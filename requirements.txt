@@ -8,8 +8,9 @@ numpy>=2.1.0
 tqdm>=4.66.0
 joblib>=1.4.0
 lxml>=5.0.0
-PyPDF2==3.0.1
-python-magic-bin==0.4.14
+PyPDF2>=3.0.1
+python-magic
+pikepdf
 pdfminer.six==20231228
 olefile==0.47
 python-docx==1.1.2

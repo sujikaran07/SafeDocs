@@ -1,0 +1,6 @@
+[phases.install]
+dependsOn = ["setup"]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.setup]
+nixPkgs = ["python311", "libmagic", "libmagic-dev", "gcc", "g++"]
