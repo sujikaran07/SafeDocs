@@ -1,0 +1,11 @@
+{
+    "$schema": "https://railway.app/railway.schema.json",
+    "build": {
+        "builder": "NIXPACKS"
+    },
+    "deploy": {
+        "root": "/engine",
+        "healthcheckPath": "/health",
+        "healthcheckTimeout": 100
+    }
+}
