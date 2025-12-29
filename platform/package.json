@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "engine:dev": "cd ../engine && py -m uvicorn api.api_stateless:app --reload --port 8000",
-    "setup:engine": "cd ../engine && py -m pip install -r requirements.txt --prefer-binary"
+    "setup:engine": "cd ../engine && py -m pip install -r requirements.txt --prefer-binary",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
     "@auth/prisma-adapter": "^2.11.1",
     "@stripe/stripe-js": "^8.6.0",
     "@types/bcryptjs": "^2.4.6",
@@ -34,7 +36,6 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "@prisma/client": "^5.10.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
@@ -42,8 +43,16 @@
     "@types/react-icons": "^2.2.7",
     "eslint": "^9",
     "eslint-config-next": "16.1.0",
-    "prisma": "^5.10.2",
+    "prisma": "^5.22.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "sharp"
+    ]
   }
 }
