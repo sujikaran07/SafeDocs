@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+
+# Next.js build
+.next/
+out/
+build/
+
+# Logs
+logs
+*.log
+
+# Environment
+.env
+.env*.local
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Python (Engine)
+../engine/__pycache__/
+../engine/*.py[cod]
+../engine/.venv/
+../engine/venv/
+../engine/out/

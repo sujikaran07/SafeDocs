@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+platform/node_modules/
+.pnp
+.pnp.*
+.yarn/*
+
+# Build outputs
+.next/
+platform/.next/
+out/
+platform/out/
+build/
+platform/build/
+engine/out/
+
+# Logs
+logs
+*.log
+platform/logs
+engine/logs
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+platform/.env
+platform/.env.local
+
+# Python
+__pycache__/
+engine/__pycache__/
+*.py[cod]
+*$py.class
+engine/*.py[cod]
+.venv/
+engine/.venv/
+venv/
+engine/venv/
+ENV/
+env/
+
+# Data and Artifacts
+artifacts/
+temp/
+tmp/
+
+# System files
+.DS_Store
+Thumbs.db
+.gemini/
+.agent/

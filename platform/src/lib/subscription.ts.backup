@@ -1,0 +1,436 @@
+import { prisma } from "./prisma";
+import { Plan, SubscriptionStatus, NotificationType } from "@prisma/client";
+
+/**
+ * Plan Limits Configuration
+ */
+export const PLAN_LIMITS = {
+    FREE: {
+        monthlyScans: 3,
+        apiCalls: 100,
+        storageMB: 100,
+        price: 0,
+        features: [
+            "3 document scans per month",
+            "Basic threat detection",
+            "48-hour file retention",
+            "Email support"
+        ]
+    },
+    PRO: {
+        monthlyScans: 100,
+        apiCalls: 5000,
+        storageMB: 10000,
+        price: 29,
+        features: [
+            "100 document scans per month",
+            "Advanced AI detection (LightGBM + MiniLM)",
+            "30-day file retention",
+            "Priority email support",
+            "API access",
+            "Detailed analytics"
+        ]
+    },
+    ENTERPRISE: {
+        monthlyScans: -1, // unlimited
+        apiCalls: -1,
+        storageMB: -1,
+        price: 199,
+        features: [
+            "Unlimited document scans",
+            "All AI models + custom rules",
+            "Unlimited file retention",
+            "24/7 phone & email support",
+            "Dedicated account manager",
+            "Custom integrations",
+            "SLA guarantee",
+            "Advanced compliance reports"
+        ]
+    }
+} as const;
+
+/**
+ * Get or create subscription for user
+ */
+export async function getOrCreateSubscription(userId: string) {
+    let subscription = await prisma.subscription.findUnique({
+        where: { userId }
+    });
+
+    if (!subscription) {
+        // Create FREE subscription by default
+        subscription = await prisma.subscription.create({
+            data: {
+                userId,
+                plan: Plan.FREE,
+                status: SubscriptionStatus.ACTIVE,
+                monthlyScansLimit: PLAN_LIMITS.FREE.monthlyScans,
+                monthlyScansUsed: 0,
+                lastResetAt: new Date(),
+                currentPeriodStart: new Date(),
+                currentPeriodEnd: getNextMonthDate()
+            }
+        });
+
+        // Create initial usage tracking
+        const now = new Date();
+        await prisma.usageTracking.create({
+            data: {
+                userId,
+                subscriptionId: subscription.id,
+                month: now.getMonth() + 1,
+                year: now.getFullYear(),
+                scansLimit: PLAN_LIMITS.FREE.monthlyScans,
+                scansUsed: 0,
+                apiCallsLimit: PLAN_LIMITS.FREE.apiCalls,
+                apiCallsUsed: 0,
+                storageLimitMB: PLAN_LIMITS.FREE.storageMB,
+                storageUsedMB: 0
+            }
+        });
+    }
+
+    return subscription;
+}
+
+/**
+ * Check if user can scan (has quota remaining)
+ */
+export async function canUserScan(userId: string): Promise<{
+    allowed: boolean;
+    reason?: string;
+    scansUsed?: number;
+    scansLimit?: number;
+    plan?: Plan;
+}> {
+    const subscription = await getOrCreateSubscription(userId);
+
+    // Check if subscription needs monthly reset
+    await checkAndResetMonthlyQuota(subscription);
+
+    // Refresh subscription data after potential reset
+    const updatedSub = await prisma.subscription.findUnique({
+        where: { id: subscription.id }
+    });
+
+    if (!updatedSub) {
+        return { allowed: false, reason: "Subscription not found" };
+    }
+
+    // Check subscription status
+    if (updatedSub.status !== SubscriptionStatus.ACTIVE &&
+        updatedSub.status !== SubscriptionStatus.TRIALING) {
+        return {
+            allowed: false,
+            reason: "Subscription is not active",
+            plan: updatedSub.plan
+        };
+    }
+
+    // ENTERPRISE = unlimited
+    if (updatedSub.plan === Plan.ENTERPRISE) {
+        return {
+            allowed: true,
+            scansUsed: updatedSub.monthlyScansUsed,
+            scansLimit: -1,
+            plan: updatedSub.plan
+        };
+    }
+
+    // Check quota
+    if (updatedSub.monthlyScansUsed >= updatedSub.monthlyScansLimit) {
+        return {
+            allowed: false,
+            reason: `Monthly quota exceeded. You've used ${updatedSub.monthlyScansUsed}/${updatedSub.monthlyScansLimit} scans.`,
+            scansUsed: updatedSub.monthlyScansUsed,
+            scansLimit: updatedSub.monthlyScansLimit,
+            plan: updatedSub.plan
+        };
+    }
+
+    return {
+        allowed: true,
+        scansUsed: updatedSub.monthlyScansUsed,
+        scansLimit: updatedSub.monthlyScansLimit,
+        plan: updatedSub.plan
+    };
+}
+
+/**
+ * Increment scan usage (call after successful scan)
+ */
+export async function incrementScanUsage(userId: string) {
+    const subscription = await getOrCreateSubscription(userId);
+
+    // Update subscription scan count
+    const updated = await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+            monthlyScansUsed: {
+                increment: 1
+            }
+        }
+    });
+
+    // Update usage tracking
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+
+    await prisma.usageTracking.upsert({
+        where: {
+            subscriptionId_year_month: {
+                subscriptionId: subscription.id,
+                year,
+                month
+            }
+        },
+        update: {
+            scansUsed: {
+                increment: 1
+            },
+            updatedAt: new Date()
+        },
+        create: {
+            userId,
+            subscriptionId: subscription.id,
+            month,
+            year,
+            scansUsed: 1,
+            scansLimit: updated.monthlyScansLimit,
+            apiCallsUsed: 0,
+            apiCallsLimit: PLAN_LIMITS[updated.plan].apiCalls,
+            storageUsedMB: 0,
+            storageLimitMB: PLAN_LIMITS[updated.plan].storageMB
+        }
+    });
+
+    // Send notification if quota is low
+    await checkAndNotifyQuota(userId, updated);
+
+    return updated;
+}
+
+/**
+ * Check and reset monthly quota if period has ended
+ */
+export async function checkAndResetMonthlyQuota(subscription: any) {
+    const now = new Date();
+
+    // Check if we're in a new month
+    if (!subscription.lastResetAt || isNewMonth(subscription.lastResetAt, now)) {
+        await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+                monthlyScansUsed: 0,
+                lastResetAt: now,
+                currentPeriodStart: now,
+                currentPeriodEnd: getNextMonthDate()
+            }
+        });
+    }
+}
+
+/**
+ * Check if date has crossed into a new month
+ */
+function isNewMonth(lastReset: Date, now: Date): boolean {
+    return (
+        now.getFullYear() > lastReset.getFullYear() ||
+        (now.getFullYear() === lastReset.getFullYear() &&
+            now.getMonth() > lastReset.getMonth())
+    );
+}
+
+/**
+ * Get date for next month
+ */
+function getNextMonthDate(): Date {
+    const date = new Date();
+    date.setMonth(date.getMonth() + 1);
+    return date;
+}
+
+/**
+ * Send quota warning notifications
+ */
+async function checkAndNotifyQuota(userId: string, subscription: any) {
+    const percentUsed = (subscription.monthlyScansUsed / subscription.monthlyScansLimit) * 100;
+
+    // 80% warning
+    if (percentUsed >= 80 && percentUsed < 100) {
+        await createNotification(userId, {
+            type: NotificationType.QUOTA_WARNING,
+            title: "Scan Quota Warning",
+            message: `You've used ${subscription.monthlyScansUsed} of ${subscription.monthlyScansLimit} scans this month (${Math.round(percentUsed)}%). Consider upgrading for more scans.`,
+            actionUrl: "/upgrade",
+            actionLabel: "Upgrade Plan"
+        });
+    }
+
+    // 100% exceeded
+    if (percentUsed >= 100) {
+        await createNotification(userId, {
+            type: NotificationType.QUOTA_EXCEEDED,
+            title: "Scan Quota Exceeded",
+            message: `You've reached your monthly limit of ${subscription.monthlyScansLimit} scans. Upgrade to continue scanning.`,
+            actionUrl: "/upgrade",
+            actionLabel: "Upgrade Now"
+        });
+    }
+}
+
+/**
+ * Create notification (skip duplicates within 1 hour)
+ */
+async function createNotification(userId: string, data: {
+    type: NotificationType;
+    title: string;
+    message: string;
+    actionUrl?: string;
+    actionLabel?: string;
+}) {
+    // Check for recent duplicate
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const existing = await prisma.notification.findFirst({
+        where: {
+            userId,
+            type: data.type,
+            createdAt: { gte: oneHourAgo }
+        }
+    });
+
+    if (existing) return; // Skip duplicate
+
+    await prisma.notification.create({
+        data: {
+            userId,
+            ...data
+        }
+    });
+}
+
+/**
+ * Upgrade user plan
+ */
+export async function upgradePlan(
+    userId: string,
+    newPlan: Plan,
+    stripeData?: {
+        customerId: string;
+        subscriptionId: string;
+        priceId: string;
+    }
+) {
+    const subscription = await getOrCreateSubscription(userId);
+    const limits = PLAN_LIMITS[newPlan];
+
+    const updated = await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+            plan: newPlan,
+            status: SubscriptionStatus.ACTIVE,
+            monthlyScansLimit: limits.monthlyScans,
+            stripeCustomerId: stripeData?.customerId,
+            stripeSubscriptionId: stripeData?.subscriptionId,
+            stripePriceId: stripeData?.priceId,
+            currentPeriodStart: new Date(),
+            currentPeriodEnd: getNextMonthDate()
+        }
+    });
+
+    // Create notification
+    await createNotification(userId, {
+        type: NotificationType.SUBSCRIPTION_RENEWED,
+        title: `Welcome to ${newPlan} Plan!`,
+        message: `Your plan has been upgraded. You now have ${limits.monthlyScans === -1 ? 'unlimited' : limits.monthlyScans} scans per month.`,
+        actionUrl: "/dashboard",
+        actionLabel: "View Dashboard"
+    });
+
+    // Audit log
+    await prisma.auditLog.create({
+        data: {
+            userId,
+            action: "UPGRADE_PLAN",
+            details: {
+                oldPlan: subscription.plan,
+                newPlan,
+                timestamp: new Date().toISOString()
+            }
+        }
+    });
+
+    return updated;
+}
+
+/**
+ * Downgrade/cancel plan
+ */
+export async function cancelPlan(userId: string, immediate: boolean = false) {
+    const subscription = await getOrCreateSubscription(userId);
+
+    if (immediate) {
+        // Immediate cancellation - revert to FREE
+        await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+                plan: Plan.FREE,
+                status: SubscriptionStatus.CANCELED,
+                monthlyScansLimit: PLAN_LIMITS.FREE.monthlyScans,
+                canceledAt: new Date(),
+                cancelAtPeriodEnd: false
+            }
+        });
+    } else {
+        // Cancel at period end
+        await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+                cancelAtPeriodEnd: true
+            }
+        });
+    }
+
+    await createNotification(userId, {
+        type: NotificationType.SUBSCRIPTION_CANCELED,
+        title: "Subscription Canceled",
+        message: immediate
+            ? "Your subscription has been canceled. You now have a FREE plan."
+            : "Your subscription will be canceled at the end of the billing period.",
+        actionUrl: "/settings",
+        actionLabel: "Manage Subscription"
+    });
+}
+
+/**
+ * Get subscription details with usage info
+ */
+export async function getSubscriptionDetails(userId: string) {
+    const subscription = await getOrCreateSubscription(userId);
+    await checkAndResetMonthlyQuota(subscription);
+
+    const updated = await prisma.subscription.findUnique({
+        where: { id: subscription.id },
+        include: {
+            usageTracking: {
+                orderBy: { createdAt: 'desc' },
+                take: 12 // Last 12 months
+            }
+        }
+    });
+
+    const limits = PLAN_LIMITS[updated!.plan];
+    const percentUsed = updated!.monthlyScansLimit > 0
+        ? (updated!.monthlyScansUsed / updated!.monthlyScansLimit) * 100
+        : 0;
+
+    return {
+        ...updated,
+        limits,
+        percentUsed,
+        scansRemaining: updated!.monthlyScansLimit === -1
+            ? -1
+            : Math.max(0, updated!.monthlyScansLimit - updated!.monthlyScansUsed)
+    };
+}

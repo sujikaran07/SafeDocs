@@ -1,0 +1,86 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth-server";
+import { prisma } from "@/lib/prisma";
+
+/**
+ * GET /api/notifications
+ * Returns user's notifications (unread first)
+ */
+export async function GET(req: NextRequest) {
+    try {
+        const user = await getCurrentUser();
+        if (!user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+
+        const notifications = await prisma.notification.findMany({
+            where: { userId: user.id },
+            orderBy: [
+                { isRead: 'asc' },  // Unread first
+                { createdAt: 'desc' }
+            ],
+            take: 50
+        });
+
+        const unreadCount = notifications.filter(n => !n.isRead).length;
+
+        return NextResponse.json({
+            notifications,
+            unreadCount
+        });
+
+    } catch (e: any) {
+        console.error("GET /api/notifications error:", e);
+        return NextResponse.json({ detail: e.message }, { status: 500 });
+    }
+}
+
+/**
+ * POST /api/notifications/mark-read
+ * Mark notification(s) as read
+ */
+export async function POST(req: NextRequest) {
+    try {
+        const user = await getCurrentUser();
+        if (!user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+
+        const { notificationId, markAllRead } = await req.json();
+
+        if (markAllRead) {
+            // Mark all as read
+            await prisma.notification.updateMany({
+                where: {
+                    userId: user.id,
+                    isRead: false
+                },
+                data: {
+                    isRead: true,
+                    readAt: new Date()
+                }
+            });
+
+            return NextResponse.json({ success: true, message: "All notifications marked as read" });
+        }
+
+        if (notificationId) {
+            // Mark specific notification as read
+            await prisma.notification.update({
+                where: { id: notificationId },
+                data: {
+                    isRead: true,
+                    readAt: new Date()
+                }
+            });
+
+            return NextResponse.json({ success: true });
+        }
+
+        return NextResponse.json({ detail: "Missing notificationId or markAllRead" }, { status: 400 });
+
+    } catch (e: any) {
+        console.error("POST /api/notifications/mark-read error:", e);
+        return NextResponse.json({ detail: e.message }, { status: 500 });
+    }
+}

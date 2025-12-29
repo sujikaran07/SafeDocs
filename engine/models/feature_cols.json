@@ -1,0 +1,14 @@
+[
+  "malice",
+  "generic",
+  "trojan",
+  "ransomware",
+  "worm",
+  "backdoor",
+  "spyware",
+  "rootkit",
+  "encrypter",
+  "downloader",
+  "source_is_json",
+  "source_is_office"
+]

@@ -1,0 +1,1 @@
+{"features": {"malice": 0.9523809523809524, "generic": 0.2641509433962264, "trojan": 0.6226415094339622, "ransomware": 0.0, "worm": 0.0188679245283018, "backdoor": 0.0, "spyware": 0.0, "rootkit": 0.0, "encrypter": 0.0943396226415094, "downloader": 0.0}}

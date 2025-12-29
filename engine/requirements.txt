@@ -1,0 +1,25 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+lightgbm>=4.5.0
+scikit-learn>=1.5.0
+pandas>=2.2.0
+numpy>=2.1.0
+tqdm>=4.66.0
+joblib>=1.4.0
+# file-type parsing & sanitization
+lxml>=5.0.0
+PyPDF2==3.0.1
+python-magic-bin==0.4.14
+pdfminer.six==20231228
+olefile==0.47
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+# Packages related to the database
+motor==3.6.0 
+pymongo==4.9.1 
+python-dotenv==1.0.1
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
+email-validator==2.2.0
