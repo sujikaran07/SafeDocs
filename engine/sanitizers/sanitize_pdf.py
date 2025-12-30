@@ -1,255 +1,189 @@
 """
-SafeDocs PDF Sanitizer — structural hardening + 5k+ keyword scrub
-Improved to avoid corrupting PDF XRefs and handle obfuscation.
+SafeDocs PDF Sanitizer — Surgical Cleaning with pikepdf (QPDF)
+Prioritizes in-place sanitization to preserve document fidelity while neutralizing threats.
 """
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Iterable, Any
-import io, re, shutil, hashlib, itertools, random
+from typing import Dict, List, Any
+import io, re, shutil, hashlib, tempfile
 
-# Optional deep scrub
+# Try importing pikepdf (preferred engine)
 try:
-    import pikepdf  # type: ignore
-except Exception:
+    import pikepdf
+except ImportError:
     pikepdf = None
 
+# Always need PyPDF2 as fallback
 try:
     from PyPDF2 import PdfReader, PdfWriter
     from PyPDF2.generic import NameObject, ArrayObject
 except Exception as e:
     raise RuntimeError("PyPDF2 is required for PDF sanitization") from e
 
-
-# ---------------- Keyword expansion (→ >= 5,000 variants) ----------------
-BASE_TERMS: List[str] = [
-    # JS/actions (PDF)
-    "javascript", "/js", "/javascript", "openaction", "submitform", "launch", "gotoR", "named", "action",
-    "richmedia", "embeddedfile", "embeddedfiles", "acroform", "xfa", "needappearances",
-    "doc.exportdataobject", "util.printf", "app.launchurl", "this.submitform", "geturl",
-    "js", "javascript", "aa", "openaction", "launch",
-    # Office/LOLBins / typical malware strings
-    "macro", "vba", "vbaproject", "ole", "activex", "dde", "ddeauto", "includepicture", "includetext",
-    "hyperlink", "attachedtemplate",
-]
-
-LEET_MAP = {
-    "a": ["a", "4", "@"], "e": ["e", "3"], "i": ["i", "1", "!"],
-    "o": ["o", "0"], "s": ["s", "5", "$"], "t": ["t", "7"]
-}
-
-def _leetify(token: str, cap: int = 5) -> List[str]:
-    pools = []
-    for ch in token:
-        low = ch.lower()
-        if low in LEET_MAP: pools.append(LEET_MAP[low])
-        else: pools.append([ch])
-    out = set()
-    for combo in itertools.product(*pools):
-        out.add("".join(combo))
-        if len(out) >= cap: break
-    return list(out)
-
-def expand_terms(min_count: int = 5000) -> List[str]:
-    seeds = set(BASE_TERMS)
-    expanded = set()
-    for t in seeds:
-        t = t.strip()
-        if not t: continue
-        expanded.add(t)
-        expanded.add(t.lower())
-        expanded.add(t.upper())
-        if len(t) > 3:
-            for v in _leetify(t): expanded.add(v)
-    
-    # Add PDF hex-encoded versions of keys
-    # e.g. /JavaScript -> /J#61vaScript
-    for t in ["JavaScript", "JS", "OpenAction", "AA", "Launch", "RichMedia"]:
-        expanded.add(t)
-        # Simple one-char hex obfuscation
-        for i in range(1, len(t)):
-            hex_ch = "#" + hex(ord(t[i]))[2:].zfill(2)
-            expanded.add(t[:i] + hex_ch + t[i+1:])
-            
-    return sorted(list(expanded), key=len, reverse=True)
-
-EXPANDED_TERMS = expand_terms()
-
 def _sha256(b: bytes) -> str:
     h = hashlib.sha256(); h.update(b); return h.hexdigest()
 
-def _drop_key(obj: Any, key: str, removed: List[str], label: str | None = None) -> bool:
-    try:
-        # Handle PyPDF2 DictionaryObject
-        if key in obj:
-            del obj[key]
-            removed.append(label or key.lstrip("/"))
-            return True
-    except Exception:
-        pass
-    return False
+def _sanitize_with_pikepdf(in_path: Path, out_path: Path) -> Dict[str, Any]:
+    """
+    Surgically remove JS and Actions using QPDF/pikepdf.
+    This preserves the PDF structure (XRefs, uncompressed streams) much better than re-building.
+    """
+    removed = []
+    stats = {"js": 0, "actions": 0, "annotations": 0}
+    
+    with pikepdf.open(str(in_path), allow_overwriting_input=True) as pdf:
+        # 1. Clean Root / Catalog
+        root = pdf.root
+        if "/OpenAction" in root:
+            del root["/OpenAction"]
+            removed.append("OpenAction")
+            stats["actions"] += 1
+        if "/AA" in root:
+            del root["/AA"]
+            removed.append("Catalog.AA")
+            stats["actions"] += 1
+        
+        # 2. Clean Names (Embedded JS)
+        if "/Names" in root and "/JavaScript" in root["/Names"]:
+            del root["/Names"]["/JavaScript"]
+            removed.append("Names.JavaScript")
+            stats["js"] += 1
 
-def _neutralize_keyword(match: re.Match) -> str:
-    """Neutralize a keyword while preserving length to avoid breaking XRefs."""
-    val = match.group(0)
-    if not val: return val
-    # Replace second char with underscore or similar to 'break' the word
-    # e.g. /JavaScript -> /J_vaScript
-    if len(val) > 2:
-        return val[0] + "_" + val[2:]
-    return "_" * len(val)
+        # 3. Clean AcroForm (Form Actions)
+        if "/AcroForm" in root:
+            acro = root["/AcroForm"]
+            # Remove only dangerous keys, leave fields intact if possible
+            for k in ["/JS", "/JavaScript", "/AA"]:
+                if k in acro:
+                    del acro[k]
+                    removed.append(f"AcroForm{k}")
+                    stats["js" if "JS" in k else "actions"] += 1
+            # Note: We keep /XFA for now as removing it breaks modern forms,
+            # unless we detect it specifically has malicious scripts.
+            # (Future: parse XFA xml to sanitize it)
 
-def _scrub_bytes_safely(data: bytes, tokens: List[str]) -> bytes:
-    """Scrub keywords from bytes while PRESERVING LENGTH."""
-    try:
-        text = data.decode("latin-1", errors="ignore")
-        # Optimization: only run regex for batches
-        BATCH = 100
-        for i in range(0, len(tokens), BATCH):
-            chunk = tokens[i:i+BATCH]
-            pattern = "|".join(re.escape(t) for t in chunk if t)
-            rx = re.compile(pattern, re.IGNORECASE)
-            text = rx.sub(_neutralize_keyword, text)
-        return text.encode("latin-1", errors="ignore")
-    except Exception:
-        return data
+        # 4. Clean Pages (Page Actions & Annotations)
+        for page in pdf.pages:
+            # Page Actions
+            if "/AA" in page:
+                del page["/AA"]
+                removed.append("Page.AA")
+                stats["actions"] += 1
+            
+            # Annotations
+            if "/Annots" in page:
+                annots = page["/Annots"]
+                # Iterate backwards to delete safely
+                for i in range(len(annots) - 1, -1, -1):
+                    try:
+                        a = annots[i]
+                        # Check logic: Actions or JS
+                        is_bad = False
+                        if "/A" in a: # Action dictionary
+                            action = a["/A"]
+                            if "/S" in action and action["/S"] in ["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]:
+                                is_bad = True
+                        if "/AA" in a: # Additional Actions
+                            is_bad = True
+                        
+                        if is_bad:
+                            del annots[i]
+                            stats["annotations"] += 1
+                    except Exception:
+                        pass
+
+        # 5. Metadata Scrub (Optional but good)
+        if "/Metadata" in root:
+           del root["/Metadata"]
+        
+        # Save
+        pdf.save(str(out_path))
+
+    return {
+        "status": "ok",
+        "sanitized_file": str(out_path),
+        "removed": list(set(removed)),
+        "notes": ["Sanitized with pikepdf (Surgical)"],
+        "stats": stats
+    }
+
+def _sanitize_with_pypdf(in_path: Path, out_path: Path) -> Dict[str, Any]:
+    """Fallback: Rebuild PDF with PyPDF2 (More thorough but riskier for complex docs)"""
+    removed: List[str] = []
+    stats: Dict[str, int] = {"js": 0, "actions": 0, "annotations": 0}
+    
+    reader = PdfReader(str(in_path))
+    writer = PdfWriter()
+
+    # Catalog
+    root = reader.trailer.get("/Root")
+    if root:
+        if "/OpenAction" in root:
+            del root["/OpenAction"]; removed.append("OpenAction")
+        if "/AA" in root:
+            del root["/AA"]; removed.append("Catalog.AA")
+        if "/Names" in root and "/JavaScript" in root["/Names"]:
+             del root["/Names"]["/JavaScript"]; removed.append("Names.JavaScript")
+
+    # Pages
+    for page in reader.pages:
+        if "/AA" in page:
+             del page["/AA"]; removed.append("Page.AA")
+        
+        # Annotations (Surgical)
+        if "/Annots" in page:
+            try:
+                annots = page["/Annots"]
+                if isinstance(annots, list):
+                    safe = []
+                    for a in annots:
+                         a_obj = a.get_object() if hasattr(a, "get_object") else a
+                         if not any(k in a_obj for k in ["/JavaScript", "/JS", "/AA"]):
+                             safe.append(a)
+                         else:
+                             stats["annotations"] += 1
+                    if len(safe) < len(annots):
+                        page[NameObject("/Annots")] = ArrayObject(safe)
+            except Exception: pass
+        
+        writer.add_page(page)
+
+    with open(out_path, "wb") as f:
+        writer.write(f)
+
+    return {
+        "status": "ok", 
+        "sanitized_file": str(out_path), 
+        "removed": removed,
+        "notes": ["Sanitized with PyPDF2 (Fallback)"],
+        "stats": stats
+    }
 
 def sanitize_pdf(in_path: str | Path, out_path: str | Path):
     in_path = Path(in_path); out_path = Path(out_path)
-    removed: List[str] = []
-    stats: Dict[str, int] = {"js": 0, "actions": 0, "annotations": 0}
-    orig_bytes = in_path.read_bytes()
-    orig_sha = _sha256(orig_bytes)
-
-    try:
-        # 1) Structural cleaning with PyPDF2
-        reader = PdfReader(str(in_path))
-        writer = PdfWriter()
-
-        # Catalog
-        root = reader.trailer.get("/Root")
-        if root:
-            # Cast to dictionary if it's a reference
-            if "/OpenAction" in root:
-                del root["/OpenAction"]; removed.append("OpenAction"); stats["actions"] += 1
-            if "/AA" in root:
-                del root["/AA"]; removed.append("Catalog.AA"); stats["actions"] += 1
-            
-            # Names / JS
-            if "/Names" in root:
-                names = root["/Names"]
-                if "/JavaScript" in names:
-                    del names["/JavaScript"]; removed.append("Names.JavaScript"); stats["js"] += 1
-                if "/EmbeddedFiles" in names:
-                    del names["/EmbeddedFiles"]; removed.append("Names.EmbeddedFiles")
-
-            # AcroForm
-            if "/AcroForm" in root:
-                acro = root["/AcroForm"]
-                for k in ["/XFA", "/JS", "/JavaScript", "/AA"]:
-                    if k in acro:
-                        del acro[k]
-                        removed.append(f"AcroForm.{k.lstrip('/')}")
-                        if "JS" in k: stats["js"] += 1
-
-        # Pages & Annots
-        for page in reader.pages:
-            if "/AA" in page:
-                del page["/AA"]; removed.append("Page.AA"); stats["actions"] += 1
-            if "/Annots" in page:
-                try:
-                    # Filter annotations instead of dropping all
-                    annots = page["/Annots"]
-                    if isinstance(annots, list):
-                        safe_annots = []
-                        for a in annots:
-                            # Dereference if indirect object
-                            a_obj = a.get_object() if hasattr(a, "get_object") else a
-                            subtype = a_obj.get("/Subtype", "")
-                            # Drop Widget (forms), Screen (media), Link (if external), or any with JS actions
-                            is_dangerous = (
-                                "/JavaScript" in a_obj or 
-                                "/JS" in a_obj or 
-                                "/AA" in a_obj or
-                                subtype in ["/Screen", "/Movie", "/3D"]
-                            )
-                            if not is_dangerous:
-                                safe_annots.append(a)
-                            else:
-                                stats["annotations"] += 1
-                                removed.append("Annot.Risk")
-                        
-                        # Update page annotations
-                        if len(safe_annots) < len(annots):
-                            page[NameObject("/Annots")] = ArrayObject(safe_annots)
-                except Exception: 
-                    pass
-            writer.add_page(page)
-
-        # Write to intermediate buffer
-        writer.add_metadata({"/Producer": "SafeDocs CDR"})
-        buf = io.BytesIO()
-        writer.write(buf)
-        cleaned_pdf = buf.getvalue()
-
-        # 2) Deep Byte Scrub SKIPPED for primary path to prevent content corruption
-        # cleaned_pdf = _scrub_bytes_safely(cleaned_pdf, EXPANDED_TERMS)
-
-        # 3) Final Polish with pikepdf (if available) - rebuilds XRefs properly
-        if pikepdf:
-            try:
-                with pikepdf.open(io.BytesIO(cleaned_pdf)) as pdf:
-                    # Purge metadata
-                    if "/Metadata" in pdf.root: del pdf.root["/Metadata"]
-                    # Save with linearize=False to keep it simple but rebuild XRef
-                    out_io = io.BytesIO()
-                    pdf.save(out_io, linearize=False)
-                    cleaned_pdf = out_io.getvalue()
-                    removed.append("Metadata_Pike")
-            except Exception:
-                pass
-
-        out_path.write_bytes(cleaned_pdf)
-
-        # Ensure different hash
-        if _sha256(cleaned_pdf) == orig_sha:
-            with open(out_path, "ab") as f:
-                f.write(b"\n% Sanitized_by_SafeDocs\n")
-
-        return {
-            "status": "ok",
-            "sanitized_file": str(out_path),
-            "removed": sorted(set(removed)),
-            "stats": stats,
-        }
-
-    except Exception as e:
-        # Fallback to pure byte-level neutralizing if structural analysis fails
-        print(f"⚠️ PDF structural analysis failed: {e}. Falling back to byte-level scrubbing.")
+    
+    # Try pikepdf first (High Fidelity)
+    if pikepdf:
         try:
-            cleaned = _scrub_bytes_safely(orig_bytes, EXPANDED_TERMS)
-            if _sha256(cleaned) == orig_sha:
-                cleaned += b"\n% Sanitized_Fallback\n"
-            out_path.write_bytes(cleaned)
-            return {
-                "status": "ok",
-                "sanitized_file": str(out_path),
-                "removed": ["Aggressive_Byte_Scrub"],
-                "notes": [f"Fallback used due to error: {str(e)}"]
-            }
-        except Exception as e2:
-            shutil.copy(in_path, out_path)
-            return {"status": "failed", "error": str(e2), "sanitized_file": str(out_path)}
+            return _sanitize_with_pikepdf(in_path, out_path)
+        except Exception as e:
+            print(f"⚠️ pikepdf failed: {e}, falling back to PyPDF2")
+    
+    # Fallback to PyPDF2
+    try:
+        return _sanitize_with_pypdf(in_path, out_path)
+    except Exception as e:
+         # Absolute fail-safe: Copy original if both fail, but mark as error
+         shutil.copy(in_path, out_path)
+         return {"status": "failed", "error": str(e)}
 
 def sanitize_pdf_bytes(data: bytes) -> bytes:
-    with io.BytesIO() as bio_in, io.BytesIO() as bio_out:
-        with tempfile.TemporaryDirectory() as td:
-            ip = Path(td) / "in.pdf"
-            op = Path(td) / "out.pdf"
-            ip.write_bytes(data)
-            res = sanitize_pdf(ip, op)
-            if res["status"] == "ok":
-                return op.read_bytes()
-            return data
-
-import tempfile # Added missing import
+    with tempfile.TemporaryDirectory() as td:
+        ip = Path(td) / "in.pdf"
+        op = Path(td) / "out.pdf"
+        ip.write_bytes(data)
+        res = sanitize_pdf(ip, op)
+        if res["status"] == "ok":
+            return op.read_bytes()
+        return data
