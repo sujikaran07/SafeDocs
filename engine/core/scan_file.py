@@ -227,6 +227,20 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
 
         # Extract findings BEFORE determining verdict
         findings = _extract_findings(data, ext)
+
+        # DEBUG: Add ML/Heuristic errors to findings so we can see them in UI
+        if "lgbm_error" in signals:
+             findings.append({
+                 "id": "debug_ml_error",
+                 "severity": "info",
+                 "message": f"ML Engine Error: {signals['lgbm_error']}"
+             })
+        if "heuristics_error" in signals:
+             findings.append({
+                 "id": "debug_heuristics_error",
+                 "severity": "info",
+                 "message": f"Heuristics Error: {signals['heuristics_error']}"
+             })
         
         # Verdict based on ACTUAL malicious features, not arbitrary threshold
         # Check for concrete evidence of malicious content
