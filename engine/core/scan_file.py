@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 import hashlib
+import io
 import math
 import os
 import re
@@ -92,14 +93,58 @@ def _extract_findings(data: bytes, ext: str) -> List[Dict[str, str]]:
         })
 
     if ext == ".pdf":
-        for pat in PDF_JS_PATTERNS:
-            if re.search(pat, data):
-                findings.append({
-                    "id": "pdf_script_js",
-                    "severity": "high",
-                    "message": "PDF contains JavaScript or auto-action hints (/JavaScript, /JS, /OpenAction)."
-                })
-                break
+        # 1. Try robust pikepdf detection first (handles compressed streams)
+        try:
+            import pikepdf
+            with pikepdf.open(io.BytesIO(data)) as pdf:
+                # Check root dictionary
+                root = pdf.root
+                if "/OpenAction" in root or "/AA" in root:
+                    findings.append({
+                        "id": "pdf_script_js",
+                        "severity": "high",
+                        "message": "PDF contains auto-execution triggers (OpenAction/AA) detected by structural analysis."
+                    })
+                
+                # Check for /JS in Names
+                if "/Names" in root and "/JavaScript" in root.Names:
+                    findings.append({
+                        "id": "pdf_script_js",
+                        "severity": "high",
+                        "message": "PDF contains Named JavaScript objects."
+                    })
+
+                # Iterate ALL objects for JS action types (Deep Scan)
+                # We limit to 500 objects to keep it fast for scanning
+                checked = 0
+                found_deep = False
+                for obj in pdf.objects:
+                    checked += 1
+                    if checked > 1000: break 
+                    if isinstance(obj, pikepdf.Dictionary):
+                        # Check keys
+                        if "/JS" in obj or "/JavaScript" in obj:
+                            found_deep = True; break
+                        if "/S" in obj and str(obj["/S"]) in ["/JavaScript", "/Launch", "/SubmitForm"]:
+                            found_deep = True; break
+                
+                if found_deep:
+                    findings.append({
+                        "id": "pdf_script_js",
+                        "severity": "high",
+                        "message": "PDF contains deep-seated JavaScript or Launch actions."
+                    })
+
+        except Exception:
+            # Fallback to regex if pikepdf fails or not installed
+            for pat in PDF_JS_PATTERNS:
+                if re.search(pat, data):
+                    findings.append({
+                        "id": "pdf_script_js",
+                        "severity": "high",
+                        "message": "PDF contains potentially malicious keywords (regex fallback)."
+                    })
+                    break
     elif ext in (".docx", ".pptx", ".xlsx"):
         if any(h in low for h in OOXML_VBA_HINTS):
             findings.append({
@@ -261,12 +306,13 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
         has_medium_risk_with_high_score = any(f.get("severity") == "medium" for f in findings) and risk_score >= 0.70
         
         # Determine verdict based on findings + risk score combination
-        if has_javascript:
-            # Any JavaScript/macro = definitely malicious
+        # Determine verdict based on findings + risk score combination
+        if has_javascript or has_high_risk_findings:
+            # Concrete signature match = 100% confidence
             verdict = "malicious"
-        elif has_high_risk_findings:
-            # High severity findings = malicious
-            verdict = "malicious"
+            risk_score = 1.0
+            signals["P_RULES"] = 1.0
+            signals["P_META"] = 1.0
         elif has_medium_risk_with_high_score:
             # Medium findings + high ML score = likely malicious
             verdict = "malicious"
