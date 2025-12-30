@@ -8,15 +8,16 @@ import axios from "axios";
 import crypto from "crypto";
 import NodeFormData from "form-data";
 
-// Python Engine URL
-const ENGINE_URL = process.env.ENGINE_URL || "http://localhost:8000";
+// Python Engine URL - Sanitize possible quotes from ENV dashboard
+const rawEngineUrl = process.env.ENGINE_URL || "http://localhost:8000";
+const ENGINE_URL = rawEngineUrl.replace(/^["'](.+)["']$/, '$1');
 
-if (process.env.NODE_ENV === "production") {
-    console.log('--- Scan API Production Setup ---');
-    console.log('ENGINE_URL starts with:', ENGINE_URL?.substring(0, 10));
+if (process.env.NODE_ENV === "production" || process.env.DEBUG_SCAN) {
+    console.log('--- Scan API Diagnostics ---');
+    console.log('ENGINE_URL:', ENGINE_URL);
     console.log('DATABASE_URL present:', !!process.env.DATABASE_URL);
-    if (process.env.DATABASE_URL?.startsWith('"')) {
-        console.error('⚠️ CRITICAL: DATABASE_URL starts with a quote mark! This will break Prisma.');
+    if (process.env.DATABASE_URL?.startsWith('"') || process.env.DATABASE_URL?.endsWith('"')) {
+        console.warn('⚠️ WARNING: DATABASE_URL contains quotes. This often causes Prisma to fail.');
     }
 }
 

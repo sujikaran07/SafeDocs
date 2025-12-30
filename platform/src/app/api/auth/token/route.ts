@@ -3,7 +3,8 @@ import { getToken } from 'next-auth/jwt';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'default_secret';
+const rawSecret = process.env.JWT_SECRET || "default_secret";
+const JWT_SECRET = rawSecret.replace(/^["'](.+)["']$/, '$1');
 
 /**
  * GET /api/auth/token

@@ -1,7 +1,8 @@
 import jwt from "jsonwebtoken";
 import { headers } from "next/headers";
 
-const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
+const rawJwtSecret = process.env.JWT_SECRET || "default_secret";
+const JWT_SECRET = rawJwtSecret.replace(/^["'](.+)["']$/, '$1');
 
 export async function getCurrentUser() {
     try {

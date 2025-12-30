@@ -8,23 +8,38 @@ export async function authHeaders(): Promise<Record<string, string>> {
 
   // If no token, check if user has NextAuth session and get token
   if (!token) {
+    console.log('🔑 No token in storage. Checking for NextAuth session...');
     try {
       const sessionRes = await fetch('/api/auth/session');
+      if (!sessionRes.ok) throw new Error(`Session fetch failed: ${sessionRes.status}`);
       const session = await sessionRes.json();
 
       if (session?.user) {
+        console.log('👤 NextAuth session found for:', session.user.email, '- Requesting backend token...');
         // Google user - get/create backend token
         const tokenRes = await fetch('/api/auth/token');
+
+        if (!tokenRes.ok) {
+          const errText = await tokenRes.text();
+          console.error('❌ /api/auth/token failed:', tokenRes.status, errText.substring(0, 100));
+          throw new Error(`Auth token endpoint returned ${tokenRes.status}`);
+        }
+
         const tokenData = await tokenRes.json();
 
         if (tokenData.access_token) {
+          console.log('✅ Backend token acquired and stored');
           token = tokenData.access_token;
           // Store it for future requests
           localStorage.setItem("safedocs_token", token);
+        } else {
+          console.error('❌ /api/auth/token responded success but no access_token found');
         }
+      } else {
+        console.log('ℹ️ No active NextAuth session found.');
       }
     } catch (e) {
-      console.error('Failed to get auth token:', e);
+      console.error('❌ Failed to resolve auth token:', e);
     }
   }
 
