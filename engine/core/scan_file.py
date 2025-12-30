@@ -132,8 +132,9 @@ def _run_rules(data: bytes, ext: str, features: Dict[str, float]) -> Tuple[float
             # Fallback to Regex
             for pat in PDF_JS_PATTERNS:
                 if re.search(pat, data):
-                    rule_points += 40
-                    findings.append({"id": "pdf_regex_match", "severity": "medium", "message": "PDF raw structure matches script patterns."})
+                    # Boosted to 65 to ensure Malicious verdict + Sanitization
+                    rule_points += 65
+                    findings.append({"id": "pdf_regex_match", "severity": "high", "message": "PDF contains potentially malicious script patterns (fallback scan)."})
                     break
 
     # 3. Office Macro Check
