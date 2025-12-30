@@ -97,14 +97,25 @@ def _extract_findings(data: bytes, ext: str) -> List[Dict[str, str]]:
         try:
             import pikepdf
             with pikepdf.open(io.BytesIO(data)) as pdf:
-                # Check root dictionary
+                # Check root dictionary for OpenAction/AA but verify they are dangerous
                 root = pdf.root
-                if "/OpenAction" in root or "/AA" in root:
-                    findings.append({
-                        "id": "pdf_script_js",
-                        "severity": "high",
-                        "message": "PDF contains auto-execution triggers (OpenAction/AA) detected by structural analysis."
-                    })
+                if "/OpenAction" in root:
+                    oa = root["/OpenAction"]
+                    if isinstance(oa, pikepdf.Dictionary) and "/S" in oa:
+                         subtype = str(oa["/S"])
+                         if subtype in ["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]:
+                             findings.append({
+                                 "id": "pdf_script_js",
+                                 "severity": "high",
+                                 "message": f"PDF contains auto-execution trigger ({subtype}) in OpenAction."
+                             })
+
+                if "/AA" in root:
+                     findings.append({
+                         "id": "pdf_script_js",
+                         "severity": "high",
+                         "message": "PDF contains global auto-actions (AA)."
+                     })
                 
                 # Check for /JS in Names
                 if "/Names" in root and "/JavaScript" in root.Names:
@@ -142,7 +153,7 @@ def _extract_findings(data: bytes, ext: str) -> List[Dict[str, str]]:
                     findings.append({
                         "id": "pdf_script_js",
                         "severity": "high",
-                        "message": "PDF contains potentially malicious keywords (regex fallback)."
+                        "message": "PDF contains potential JavaScript keywords."
                     })
                     break
     elif ext in (".docx", ".pptx", ".xlsx"):
