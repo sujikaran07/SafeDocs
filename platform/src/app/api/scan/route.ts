@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+import os from "os";
 import axios from "axios";
 import crypto from "crypto";
 import NodeFormData from "form-data";
@@ -52,7 +53,12 @@ export async function POST(req: Request) {
         const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
         // 1. Save original to disk
-        const storageDir = path.join(process.cwd(), "storage");
+        // Use /tmp in production (serverless/Vercel/Railway) to avoid EROFS: read-only file system
+        const storageDir = process.env.STORAGE_PATH ||
+            (process.env.NODE_ENV === "production"
+                ? path.join(os.tmpdir(), "safedocs-storage")
+                : path.join(process.cwd(), "storage"));
+
         const uploadsDir = path.join(storageDir, "uploads");
         await mkdir(uploadsDir, { recursive: true });
 

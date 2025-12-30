@@ -26,8 +26,11 @@ export async function GET(req: NextRequest) {
         });
 
         if (!token || !token.email) {
-            console.log('❌ No NextAuth session found');
-            return NextResponse.json({ error: 'Not authenticated with Google' }, { status: 401 });
+            console.log('❌ No NextAuth session found. Cookies present:', req.cookies.getAll().map(c => c.name).join(', '));
+            return NextResponse.json({
+                error: 'Not authenticated with Google',
+                details: 'No session token found in cookies. Ensure NEXTAUTH_URL and NEXTAUTH_SECRET are correctly set.'
+            }, { status: 401 });
         }
 
         const email = token.email.toLowerCase().trim();
