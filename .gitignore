@@ -21,6 +21,7 @@ platform/logs
 engine/logs
 
 # Environment
+# Environment
 .env
 .env.local
 .env.development.local
