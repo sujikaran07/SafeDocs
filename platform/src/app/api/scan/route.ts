@@ -77,8 +77,9 @@ export async function POST(req: Request) {
 
         // 2. Call Python Engine
         // Use the 'form-data' library explicitly to handle Buffers in Node.js
-        console.log("Sending to Python Engine...");
-        const result = await (async () => {
+        console.log(`🚀 Sending to Python Engine at: ${ENGINE_URL}/scan ...`);
+        let result: any;
+        try {
             const form = new NodeFormData();
             form.append("file", buffer, { filename: filename, contentType: file.type || "application/octet-stream" });
 
@@ -88,11 +89,18 @@ export async function POST(req: Request) {
                 },
                 maxContentLength: Infinity,
                 maxBodyLength: Infinity,
+                timeout: 30000, // 30s timeout
             });
-            return response.data;
-        })();
-
-        console.log("Python response received!");
+            result = response.data;
+            console.log("✅ Python response received! Verdict:", result.verdict);
+        } catch (engineErr: any) {
+            console.error("❌ Python Engine Call Failed:", {
+                url: ENGINE_URL,
+                message: engineErr.message,
+                data: engineErr.response?.data
+            });
+            throw new Error(`Engine Communication Error: ${engineErr.message}. Verify ENGINE_URL is correct.`);
+        }
         console.log("Keys in response:", Object.keys(result));
         console.log("Full response:", JSON.stringify(result, null, 2));
 
@@ -179,7 +187,15 @@ export async function POST(req: Request) {
         });
 
     } catch (e: any) {
-        console.error("Scan error:", e);
-        return NextResponse.json({ detail: e.message || "Scan failed" }, { status: 500 });
+        console.error("❌ Scan route error:", {
+            message: e.message,
+            stack: e.stack?.split('\n')[0],
+            engine: ENGINE_URL
+        });
+        return NextResponse.json({
+            detail: e.message || "Scan failed",
+            engine_url: ENGINE_URL,
+            error_type: e.constructor.name
+        }, { status: 500 });
     }
 }
