@@ -34,15 +34,16 @@ try:
             if feature_cols_path.exists():
                 with open(feature_cols_path, 'r') as f:
                     _FEATURE_COLS = json.load(f)
-except Exception as e:
-    print(f"Warning: Could not load LightGBM model: {e}")
+    except Exception as e:
+        _LOAD_ERROR = str(e)
+        print(f"Warning: Could not load LightGBM model: {e}")
 
 def sniff_meta_from_bytes(data: bytes, ext: str = ""):
     """Extract metadata from bytes"""
     meta = {"mime": f"application/{ext.lstrip('.')}", "pages": 0}
     
     # PDF analysis
-    if ext == ".pdf" or b"%PDF" in data[:100]:
+    if ext == ".pdf" or (len(data) > 100 and b"%PDF" in data[:100]):
         meta["pdf_has_javascript"] = any(x in data for x in [b"/JavaScript", b"/OpenAction", b"/AA", b"/Launch"])
         # Try to count pages (simple heuristic)
         try:
@@ -64,7 +65,7 @@ def sniff_meta_from_bytes(data: bytes, ext: str = ""):
             meta["embedded_ole_count"] = 0
     
     # RTF analysis
-    elif ext == ".rtf" or data[:6] == b"{\\rtf1":
+    elif ext == ".rtf" or (len(data) > 6 and data[:6] == b"{\\rtf1"):
         text = data[:100000].decode("latin-1", errors="ignore")
         meta["has_embedded_objects"] = "\\objdata" in text or "\\object" in text
     
@@ -89,13 +90,13 @@ def calculate_entropy(data: bytes, max_bytes: int = 65536) -> float:
 def build_features_for_lgbm(data=None, filename: str = "", ext: str = "", path: Path = None):
     """
     Build features and get ML prediction.
-    Accepts either:
-    - data (bytes) + filename/ext
-    - path (Path object)
-    
-    Returns dict with P_LGBM (ML prediction) if model is available.
+    Returns dict with P_LGBM. Includes 'error' key if model failed to load.
     """
     try:
+        # Check for load error first
+        if _LOAD_ERROR:
+            return {"P_LGBM": 0.0, "error": f"Model load failed: {_LOAD_ERROR}"}
+        
         # Handle both path and bytes input
         if path and isinstance(path, Path):
             data = path.read_bytes()
@@ -152,13 +153,14 @@ def build_features_for_lgbm(data=None, filename: str = "", ext: str = "", path: 
                 
                 features["P_LGBM"] = float(prob)
             except Exception as e:
-                print(f"ML prediction error: {e}")
                 features["P_LGBM"] = 0.0
+                features["error"] = f"Prediction failed: {e}"
         else:
             features["P_LGBM"] = 0.0
+            if not _MODEL:
+                features["error"] = "Model not loaded (unknown reason)"
         
         return features
         
     except Exception as e:
-        print(f"Feature extraction error: {e}")
-        return {"P_LGBM": 0.0}
+        return {"P_LGBM": 0.0, "error": f"Feature extraction crash: {e}"}
