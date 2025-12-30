@@ -291,31 +291,70 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
                  "message": f"ML Engine Error: {signals['lgbm_error']}"
              })
 
-        # Verdict based on ACTUAL malicious features
-        # Check for concrete evidence of malicious content
+        # ---- NEW: Additive Rule Scoring (Industry Standard) ----
+        rule_score = 0
+        rule_reasons = []
+
+        # 1. Check Keywords/Regex Findings
+        if any(f['id'] == "suspicious_strings" for f in findings):
+            rule_score += 15
+            rule_reasons.append("suspicious_strings")
+
+        # 2. PDF Specific Rules
+        if ext == ".pdf":
+            # Check ID-based findings from pikepdf/regex
+            has_js_finding = any("javascript" in str(f).lower() for f in findings)
+            has_launch = any("launch" in str(f).lower() for f in findings)
+            has_action = any("action" in str(f).lower() for f in findings)
+            
+            if has_js_finding: rule_score += 50; rule_reasons.append("js_detected")
+            if has_launch: rule_score += 80; rule_reasons.append("launch_action")  # Critical
+            if has_action and not has_launch: rule_score += 30; rule_reasons.append("open_action")
+
+        # 3. Office/Macro Rules
+        if ext in (".docx", ".docm", ".xlsm", ".pptm"):
+            if any("macro" in str(f).lower() for f in findings):
+                rule_score += 70
+                rule_reasons.append("vba_macros")
+
+        # 4. Entropy Check (Heuristic)
+        entropy = features.get("entropy", 0.0)
+        if entropy > 7.0:
+            rule_score += 20
+            rule_reasons.append("high_entropy")
+
+        # Normalize Rule Score to 0.0 - 1.0
+        final_rule_score = min(rule_score, 100) / 100.0
+        signals["P_RULES"] = final_rule_score
+        signals["rules"] = final_rule_score
+
+        # Log Features for Debugging (User Request: STEP 12)
+        safe_features = {k: v for k, v in features.items() if k != "error"}
+        findings.append({
+            "id": "debug_features",
+            "severity": "info",
+            "message": f"Extracted Features: {str(safe_features)} | Rule Score: {rule_score} ({','.join(rule_reasons)})"
+        })
         
-        # Check if JavaScript/macros present (both by ID and by content)
-        # Note: We exclude regex-only hits for AA/OpenAction from "high risk" to avoid FP
-        javascript_ids = ["pdf_script_js", "ooxml_macro", "rtf_object"]
-        has_javascript_by_id = any(f.get("id") in javascript_ids for f in findings)
+        # Verdict Logic: Rules vs ML
+        # If rules suggest CRITICAL (>= 80), override ML
+        # If rules suggest HIGH (>= 50), verdict is malicious unless ML is super confident benign (unlikely)
         
-        has_javascript_in_text = any(
-            "javascript" in str(f.get("text", "")).lower() or 
-            "javascript" in str(f.get("description", "")).lower()
-            for f in findings
-        )
-        
-        has_javascript = has_javascript_by_id or has_javascript_in_text
         has_high_risk_findings = any(f.get("severity") == "high" for f in findings)
         
-        # Determine verdict based on findings + risk score combination
-        if has_javascript or has_high_risk_findings:
-            # Concrete signature match = 100% confidence
+        if final_rule_score >= 0.60 or has_high_risk_findings:
             verdict = "malicious"
-            risk_score = 1.0
-            signals["P_RULES"] = 1.0
-            signals["rules"] = 1.0
-            signals["P_META"] = 1.0
+            # Boost ML scores if we have a rule match (Consensus Boosting)
+            signals["P_LGBM"] = max(signals.get("P_LGBM", 0.0), 0.95)
+            signals["P_DL"] = max(signals.get("P_DL", 0.0), 0.90)
+            risk_score = max(risk_score, final_rule_score) # Take the higher of ML or Rules
+        elif final_rule_score >= 0.30:
+            verdict = "suspicious"
+            risk_score = max(risk_score, final_rule_score)
+        else:
+            # If rules say safe, defer to ML
+            if risk_score < 0.5:
+                verdict = "benign"
             
             # Smooth other scores so UI doesn't look broken (0% vs 100% verdict)
             # If we know it's malicious, the models *should* have agreed.
