@@ -1,14 +1,9 @@
 [
-  "malice",
-  "generic",
-  "trojan",
-  "ransomware",
-  "worm",
-  "backdoor",
-  "spyware",
-  "rootkit",
-  "encrypter",
-  "downloader",
-  "source_is_json",
-  "source_is_office"
+  "size_bytes",
+  "entropy",
+  "pdf_has_javascript",
+  "has_vba_project",
+  "embedded_ole_count",
+  "page_count",
+  "has_embedded_objects"
 ]

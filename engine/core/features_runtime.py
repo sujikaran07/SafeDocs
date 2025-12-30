@@ -24,8 +24,22 @@ try:
             _MODEL = loaded.get('model')
             _CALIBRATOR = loaded.get('calibrator')
             _FEATURE_COLS = loaded.get('feature_cols')
-            print(f"✓ Loaded LightGBM model: {type(_MODEL)}")
-            print(f"✓ Feature columns: {len(_FEATURE_COLS) if _FEATURE_COLS else 0}")
+            
+            # FORCE OVERRIDE: If feature_cols.json exists, use it. 
+            # This fixes the "Feature-Mismatch" flaw where pickle might have old labels.
+            feature_cols_path = models_dir / "feature_cols.json"
+            if feature_cols_path.exists():
+                try:
+                    with open(feature_cols_path, 'r') as f:
+                        cols = json.load(f)
+                        if cols and isinstance(cols, list):
+                            _FEATURE_COLS = cols
+                            print(f"✓ Loaded Feature Columns from JSON: {len(_FEATURE_COLS)}")
+                except Exception as e:
+                    print(f"Error loading feature_cols.json: {e}")
+
+            if _FEATURE_COLS:
+                print(f"✓ Final Feature columns: {len(_FEATURE_COLS)}")
         else:
             # Fallback: treat as direct model
             _MODEL = loaded

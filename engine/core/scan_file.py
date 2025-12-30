@@ -1,7 +1,6 @@
 # scan_file.py
-# Robust scan + sanitize wrapper that NEVER returns "scan_error".
-# It yields a verdict "benign" or "malicious", a stable risk_score in [0,1],
-# lightweight "findings", and per-type "recommendations".
+# Production-Grade Scan Controller
+# Architecture: Rules decide -> ML supports -> Sanitizer rebuilds (if malicious)
 
 from __future__ import annotations
 import hashlib
@@ -11,9 +10,9 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-# Optional deps from your project (import if present, else graceful fallback)
+# Optional deps
 try:
-    from features_runtime import build_features_for_lgbm  # your feature builder
+    from features_runtime import build_features_for_lgbm
 except Exception:
     build_features_for_lgbm = None
 
@@ -32,6 +31,17 @@ try:
 except Exception:
     sanitize_rtf_bytes = None
 
+# ---- Constants & Patterns (Deterministic Rules) ----
+
+SUSPICIOUS_STRINGS = [
+    "javascript", "<script", "eval(", "wscript.shell", "powershell",
+    "activexobject", "shell(", "cmd.exe", "mshta", "autoopen", "document.open",
+    "base64,", "fromcharcode(", "createobject("
+]
+
+PDF_JS_PATTERNS = [br"/JavaScript", br"/JS", br"/Launch", br"/OpenAction", br"/AA"]
+OOXML_VBA_HINTS = ["vbaProject.bin", "vba", "vbaproject", "_vba_project", "ThisDocument"]
+RTF_DANGEROUS = [r"\\objupdate", r"\\object", r"\\objdata", r"\\pict", r"\\field", r"\\*\s*generator"]
 
 def _sha256(data: bytes) -> str:
     h = hashlib.sha256()
@@ -39,8 +49,7 @@ def _sha256(data: bytes) -> str:
     return h.hexdigest()
 
 def _ext_from_name(name: str) -> str:
-    if not name:
-        return ""
+    if not name: return ""
     return os.path.splitext(name)[1].lower().strip()
 
 def _guess_mime(ext: str) -> str:
@@ -52,409 +61,247 @@ def _guess_mime(ext: str) -> str:
         ".rtf": "application/rtf",
     }.get(ext, "application/octet-stream")
 
-def _byte_entropy(sample: bytes, max_bytes: int = 65536) -> float:
-    if not sample:
-        return 0.0
-    s = sample[:max_bytes]
-    freq = [0]*256
-    for b in s:
-        freq[b] += 1
-    h = 0.0
-    n = len(s)
-    for c in freq:
-        if c:
-            p = c / n
-            h -= p * math.log2(p)
-    return min(1.0, h / 8.0)
+# ---- Phase 1: Feature Extraction & Rule Matching ----
 
-
-# ---- simple findings / rules (deterministic) ----
-
-PDF_JS_PATTERNS = [br"/JavaScript", br"/JS", br"/Launch"]
-OOXML_VBA_HINTS = ["vbaProject.bin", "vba", "vbaproject", "_vba_project", "ThisDocument"]
-RTF_DANGEROUS = [r"\\objupdate", r"\\object", r"\\objdata", r"\\pict", r"\\field", r"\\*\s*generator"]
-SUSPICIOUS_STRINGS = [
-    "javascript", "<script", "eval(", "wscript.shell", "powershell",
-    "activexobject", "shell(", "cmd.exe", "mshta", "autoopen", "document.open",
-    "base64,", "fromcharcode(", "createobject("
-]
-
-def _extract_findings(data: bytes, ext: str) -> List[Dict[str, str]]:
-    findings: List[Dict[str, str]] = []
+def _run_rules(data: bytes, ext: str, features: Dict[str, float]) -> Tuple[float, List[Dict[str, str]]]:
+    """
+    Returns a normalized Rule Score [0.0 - 1.0] and a list of specific findings.
+    """
+    rule_points = 0
+    findings = []
+    
+    # 1. Text Analysis
     txt = data[:300000].decode("latin-1", errors="ignore")
     low = txt.lower()
-
+    
     hits = [s for s in SUSPICIOUS_STRINGS if s in low]
     if hits:
+        rule_points += 15
         findings.append({
             "id": "suspicious_strings",
             "severity": "medium",
-            "message": f"Suspicious strings found: {', '.join(sorted(set(hits)))}"
+            "message": f"Suspicious strings found: {', '.join(sorted(set(hits))[:5])}"
         })
 
+    # 2. PDF Specific Deep Scan
     if ext == ".pdf":
-        # 1. Try robust pikepdf detection first (handles compressed streams)
         try:
             import pikepdf
             with pikepdf.open(io.BytesIO(data)) as pdf:
-                # Check root dictionary for OpenAction/AA but verify they are dangerous
                 root = pdf.root
+                # Critical: Launch Actions (Execution)
                 if "/OpenAction" in root:
                     oa = root["/OpenAction"]
                     if isinstance(oa, pikepdf.Dictionary) and "/S" in oa:
-                         subtype = str(oa["/S"])
-                         if subtype in ["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]:
-                             findings.append({
-                                 "id": "pdf_script_js",
-                                 "severity": "high",
-                                 "message": f"PDF contains auto-execution trigger ({subtype}) in OpenAction."
-                             })
+                        subtype = str(oa["/S"])
+                        if subtype in ["/Launch", "/SubmitForm", "/ImportData"]:
+                            rule_points += 80 # Critical
+                            findings.append({"id": "pdf_exploit_action", "severity": "critical", "message": f"PDF Auto-Launch Action detected ({subtype})."})
+                        elif subtype == "/JavaScript":
+                            rule_points += 50
+                            findings.append({"id": "pdf_js_auto", "severity": "high", "message": "PDF OpenAction executes JavaScript."})
 
-                if "/AA" in root:
-                     findings.append({
-                         "id": "pdf_script_js",
-                         "severity": "high",
-                         "message": "PDF contains global auto-actions (AA)."
-                     })
-                
-                # Check for /JS in Names
+                if "/AA" in root: 
+                    rule_points += 40
+                    findings.append({"id": "pdf_aa_action", "severity": "high", "message": "PDF contains global Auto-Actions (AA)."})
+
+                # JS in Names
                 if "/Names" in root and "/JavaScript" in root.Names:
-                    findings.append({
-                        "id": "pdf_script_js",
-                        "severity": "high",
-                        "message": "PDF contains Named JavaScript objects."
-                    })
+                    rule_points += 50
+                    findings.append({"id": "pdf_names_js", "severity": "high", "message": "PDF contains named JavaScript scripts."})
 
-                # Iterate ALL objects for JS action types (Deep Scan)
-                # We limit to 500 objects to keep it fast for scanning
+                # Deep Scan for /Launch or /JS in objects
+                deep_threat = False
                 checked = 0
-                found_deep = False
                 for obj in pdf.objects:
                     checked += 1
-                    if checked > 1000: break 
+                    if checked > 600: break # Perf limit
                     if isinstance(obj, pikepdf.Dictionary):
-                        # Check keys
+                        if "/S" in obj and str(obj["/S"]) == "/Launch":
+                            deep_threat = True; break
                         if "/JS" in obj or "/JavaScript" in obj:
-                            found_deep = True; break
-                        if "/S" in obj and str(obj["/S"]) in ["/JavaScript", "/Launch", "/SubmitForm"]:
-                            found_deep = True; break
+                            deep_threat = True; break
                 
-                if found_deep:
-                    findings.append({
-                        "id": "pdf_script_js",
-                        "severity": "high",
-                        "message": "PDF contains deep-seated JavaScript or Launch actions."
-                    })
+                if deep_threat:
+                    rule_points += 60
+                    findings.append({"id": "pdf_deep_js", "severity": "high", "message": "Hidden JavaScript/Launch actions found in objects."})
 
+        except ImportError:
+            findings.append({"id": "err_dep_missing", "severity": "warning", "message": "pikepdf not installed - deep scan skipped"})
         except Exception:
-            # Fallback to regex if pikepdf fails or not installed
+            # Fallback to Regex
             for pat in PDF_JS_PATTERNS:
                 if re.search(pat, data):
-                    findings.append({
-                        "id": "pdf_script_js",
-                        "severity": "high",
-                        "message": "PDF contains potential JavaScript keywords."
-                    })
+                    rule_points += 40
+                    findings.append({"id": "pdf_regex_match", "severity": "medium", "message": "PDF raw structure matches script patterns."})
                     break
-    elif ext in (".docx", ".pptx", ".xlsx"):
-        if any(h in low for h in OOXML_VBA_HINTS):
-            findings.append({
-                "id": "ooxml_vba_macro",
-                "severity": "high",
-                "message": "OOXML indicates embedded VBA/macro components (vbaProject.bin)."
-            })
+
+    # 3. Office Macro Check
+    elif ext in (".docx", ".docm", ".xlsm", ".pptm", ".pptx", ".xlsx"):
+        has_vba = features.get("has_vba_project", 0.0) == 1.0
+        if has_vba:
+            rule_points += 70
+            findings.append({"id": "office_macro", "severity": "high", "message": "Office document contains VBA Macros (vbaProject.bin)."})
+        
+        if features.get("embedded_ole_count", 0) > 0:
+            rule_points += 20
+            findings.append({"id": "office_ole", "severity": "medium", "message": "Office document contains embedded OLE objects."})
+
+    # 4. RTF Check
     elif ext == ".rtf":
         for pat in RTF_DANGEROUS:
             if re.search(pat, txt, flags=re.IGNORECASE):
-                findings.append({
-                    "id": "rtf_embedded_object",
-                    "severity": "high",
-                    "message": "RTF includes embedded object/field constructs that can be abused."
-                })
+                rule_points += 70
+                findings.append({"id": "rtf_exploit", "severity": "high", "message": "RTF contains potentially malicious control words."})
                 break
 
-    if not findings:
-        findings.append({
-            "id": "no_obvious_tricks",
-            "severity": "info",
-            "message": "No obvious embedded scripts/objects detected via lightweight rules."
-        })
-    return findings
+    # 5. Entropy Heuristic
+    entropy = features.get("entropy", 0.0)
+    if entropy > 7.2:
+        rule_points += 20
+        findings.append({"id": "high_entropy", "severity": "medium", "message": f"High entropy ({entropy:.2f}) indicates packed/encrypted content."})
 
-def _recommendations(ext: str, verdict: str) -> List[str]:
-    base = [
-        "Keep OS and document viewers up to date.",
-        "Prefer viewing unknown docs in a sandbox/VM or web viewer.",
-        "Verify the sender/source before opening sensitive documents."
-    ]
-    per_type = {
-        ".pdf": [
-            "Disable JavaScript in your PDF reader.",
-            "Avoid auto-open actions; open PDFs in a hardened viewer."
-        ],
-        ".docx": [
-            "Disable macros (VBA) by default; only enable for trusted documents.",
-            "Use Protected View for files from email or the Internet."
-        ],
-        ".pptx": [
-            "Be cautious of embedded media and macros in presentations.",
-            "Open in Protected View if prompted."
-        ],
-        ".xlsx": [
-            "Disable macros and external data connections by default.",
-            "Avoid clicking 'Enable Content' unless you trust the file."
-        ],
-        ".rtf": [
-            "Open RTF files in a plain-text viewer if possible.",
-            "Be cautious of embedded objects and links."
-        ]
-    }
-    out = base + per_type.get(ext, [])
-    if verdict == "malicious":
-        out = ["Do not open this file outside a sandbox. Prefer the sanitized version."] + out
-    return out
+    normalized_score = min(rule_points / 100.0, 1.0)
+    return normalized_score, findings
 
-def _simple_heuristics(data: bytes, ext: str) -> Dict[str, float]:
-    text_probe = data[:200000].decode("latin-1", errors="ignore")
-    lower = text_probe.lower()
-    entropy = _byte_entropy(data)
-
-    rules_hits = sum(1 for term in SUSPICIOUS_STRINGS if term in lower)
-    rules_score = min(1.0, rules_hits / 5.0)
-
-    type_bias = 0.05 if ext in (".pdf", ".rtf") else (0.08 if ext in (".docx", ".pptx", ".xlsx") else 0.0)
-    tree_like = min(1.0, 0.5*entropy + 0.7*rules_score + type_bias)
-    lgbm_like = min(1.0, 0.6*tree_like + 0.4*entropy)
-    dl_like = min(1.0, 0.5*entropy + 0.6*rules_score)
-    meta_score = max(0.0, min(1.0, 0.25*tree_like + 0.35*lgbm_like + 0.3*dl_like + 0.1*rules_score))
-    return {"P_TREE": tree_like, "P_LGBM": lgbm_like, "P_DL": dl_like, "P_RULES": rules_score, "P_META": meta_score}
 
 def _run_sanitizer(ext: str, data: bytes) -> Tuple[Optional[bytes], Dict[str, str]]:
+    """
+    Sanitize only runs if verdict is MALICIOUS.
+    """
     try:
+        clean_bytes = None
+        info = {}
+
         if ext == ".pdf" and sanitize_pdf_bytes:
-            out = sanitize_pdf_bytes(data)
-            return out if out is not None else None, {"sanitizer": "pdf"}
-        if ext in (".docx", ".pptx", ".xlsx") and sanitize_ooxml_bytes:
-            out = sanitize_ooxml_bytes(data, ext=ext.lstrip("."))
-            return out if out is not None else None, {"sanitizer": "ooxml"}
-        if ext == ".rtf" and sanitize_rtf_bytes:
-            out = sanitize_rtf_bytes(data)
-            return out if out is not None else None, {"sanitizer": "rtf"}
-    except Exception as exc:
-        return None, {"sanitizer_error": str(exc)}
-    return None, {}
-
-def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Optional[str] = None) -> Dict:
-    try:
-        ext = _ext_from_name(filename)
-        mime = content_type or _guess_mime(ext)
-        size = len(data)
-        sha = _sha256(data)
-
-        signals: Dict[str, float] = {}
+            clean_bytes = sanitize_pdf_bytes(data)
+            info = {"engine": "pdf_strip"}
         
-        # 1. ML Features (LightGBM)
-        if build_features_for_lgbm:
-            try:
-                feats = build_features_for_lgbm(data=data, filename=filename, ext=ext)
-                if isinstance(feats, dict):
-                     # Copy all features to signals so we can see them if needed
-                     for k, v in feats.items():
-                         if k.startswith("P_") or k in ["entropy", "size_bytes"]:
-                             signals[k] = float(v)
-            except Exception as e:
-                signals["lgbm_error"] = str(e)
-                print(f"ML Error: {e}")
-
-        # 2. Heuristics (Tree, DL, Rules)
-        try:
-            h = _simple_heuristics(data, ext)
-            for k, v in h.items():
-                # Don't overwrite if ML provided a better score for same key (unlikely)
-                if k not in signals:
-                    signals[k] = v
-        except Exception as e:
-             signals["heuristics_error"] = str(e)
-             print(f"Heuristics Error: {e}")
-
-        risk_score = float(signals.get("P_META", 0.0))
-        if "P_LGBM" in signals:
-            risk_score = min(1.0, 0.7*risk_score + 0.3*signals["P_LGBM"])
-
-        # Extract findings BEFORE determining verdict
-        findings = _extract_findings(data, ext)
-
-        if "lgbm_error" in signals:
-             findings.append({
-                 "id": "debug_ml_error",
-                 "severity": "info",
-                 "message": f"ML Engine Error: {signals['lgbm_error']}"
-             })
-
-        # ---- NEW: Additive Rule Scoring (Industry Standard) ----
-        rule_score = 0
-        rule_reasons = []
-
-        # 1. Check Keywords/Regex Findings
-        if any(f['id'] == "suspicious_strings" for f in findings):
-            rule_score += 15
-            rule_reasons.append("suspicious_strings")
-
-        # 2. PDF Specific Rules
-        if ext == ".pdf":
-            # Check ID-based findings from pikepdf/regex
-            has_js_finding = any("javascript" in str(f).lower() for f in findings)
-            has_launch = any("launch" in str(f).lower() for f in findings)
-            has_action = any("action" in str(f).lower() for f in findings)
+        elif ext in (".docx", ".pptx", ".xlsx") and sanitize_ooxml_bytes:
+            clean_bytes = sanitize_ooxml_bytes(data, ext=ext.lstrip("."))
+            info = {"engine": "ooxml_purge"}
             
-            if has_js_finding: rule_score += 50; rule_reasons.append("js_detected")
-            if has_launch: rule_score += 80; rule_reasons.append("launch_action")  # Critical
-            if has_action and not has_launch: rule_score += 30; rule_reasons.append("open_action")
-
-        # 3. Office/Macro Rules
-        if ext in (".docx", ".docm", ".xlsm", ".pptm"):
-            if any("macro" in str(f).lower() for f in findings):
-                rule_score += 70
-                rule_reasons.append("vba_macros")
-
-        # 4. Entropy Check (Heuristic)
-        entropy = features.get("entropy", 0.0)
-        if entropy > 7.0:
-            rule_score += 20
-            rule_reasons.append("high_entropy")
-
-        # Normalize Rule Score to 0.0 - 1.0
-        final_rule_score = min(rule_score, 100) / 100.0
-        signals["P_RULES"] = final_rule_score
-        signals["rules"] = final_rule_score
-
-        # Log Features for Debugging (User Request: STEP 12)
-        safe_features = {k: v for k, v in features.items() if k != "error"}
-        findings.append({
-            "id": "debug_features",
-            "severity": "info",
-            "message": f"Extracted Features: {str(safe_features)} | Rule Score: {rule_score} ({','.join(rule_reasons)})"
-        })
-        
-        # Verdict Logic: Rules vs ML
-        # If rules suggest CRITICAL (>= 80), override ML
-        # If rules suggest HIGH (>= 50), verdict is malicious unless ML is super confident benign (unlikely)
-        
-        has_high_risk_findings = any(f.get("severity") == "high" for f in findings)
-        
-        if final_rule_score >= 0.60 or has_high_risk_findings:
-            verdict = "malicious"
-            # Boost ML scores if we have a rule match (Consensus Boosting)
-            signals["P_LGBM"] = max(signals.get("P_LGBM", 0.0), 0.95)
-            signals["P_DL"] = max(signals.get("P_DL", 0.0), 0.90)
-            risk_score = max(risk_score, final_rule_score) # Take the higher of ML or Rules
-        elif final_rule_score >= 0.30:
-            verdict = "suspicious"
-            risk_score = max(risk_score, final_rule_score)
+        elif ext == ".rtf" and sanitize_rtf_bytes:
+            clean_bytes = sanitize_rtf_bytes(data)
+            info = {"engine": "rtf_convert"}
+            
         else:
-            # If rules say safe, defer to ML
-            if risk_score < 0.5:
-                verdict = "benign"
-            
-            # Smooth other scores so UI doesn't look broken (0% vs 100% verdict)
-            # If we know it's malicious, the models *should* have agreed.
-            signals["P_LGBM"] = max(signals.get("P_LGBM", 0.0), 0.98)
-            signals["lgbm"] = signals["P_LGBM"]
-            
-            signals["P_TREE"] = max(signals.get("P_TREE", 0.0), 0.95)
-            signals["tree"] = signals["P_TREE"]
-            
-            signals["P_DL"] = max(signals.get("P_DL", 0.0), 0.95)
-            signals["dl"] = signals["P_DL"]
-            
-        elif has_medium_risk_with_high_score:
-            # Medium findings + high ML score = likely malicious
-            verdict = "malicious"
-        elif risk_score >= 0.85:
-            # Extremely high score even without obvious findings = suspicious
-            verdict = "malicious"
-        else:
-            # No concrete evidence = benign (even if score is 60-80%)
-            verdict = "benign"
-        
-        recommendations = _recommendations(ext, verdict)
+            info = {"engine": "none", "reason": "no_sanitizer_available"}
 
-        # CRITICAL: Only sanitize malicious files!
-        # Sanitizing benign files breaks them (white screen)
-        if verdict == "malicious":
-            clean_bytes, san_meta = _run_sanitizer(ext, data)
-            sanitized = clean_bytes is not None and len(clean_bytes) > 0
-        else:
-            # Benign file - return original unchanged
-            clean_bytes = data
-            san_meta = {"engine": "none", "reason": "benign_not_sanitized"}
-            sanitized = False
+        # Validate sanitization result
+        if clean_bytes and len(clean_bytes) > 0:
+            return clean_bytes, info
+        return None, {"error": "Sanitizer produced empty output"}
 
-        return {
-            "ok": True,
+    except Exception as e:
+        return None, {"error": str(e)}
+
+# ---- Main Entry Point ----
+
+def scan_bytes(data: bytes, filename: str = "doc.bin", content_type: Optional[str] = None) -> Dict:
+    ext = _ext_from_name(filename)
+    mime = content_type or _guess_mime(ext)
+    filesize = len(data)
+    file_sha = _sha256(data)
+
+    # 1. Extract Features (Deterministic)
+    ml_signals = {}
+    features = {}
+    if build_features_for_lgbm:
+        raw_feats = build_features_for_lgbm(data=data, filename=filename, ext=ext)
+        if "error" not in raw_feats:
+            # Flatten for Rule Engine usage
+            features = raw_feats
+            # Keep ML probability separate
+            ml_signals["P_LGBM"] = raw_feats.get("P_LGBM", 0.0)
+        else:
+            ml_signals["error"] = raw_feats["error"]
+
+    # 2. Run Rules (Deterministic)
+    rule_score, findings = _run_rules(data, ext, features)
+    
+    # 3. Decision Logic (Golden Rule: Rules > ML)
+    # ML Support
+    ml_prob = ml_signals.get("P_LGBM", 0.0)
+    
+    # Composite Score (Max of Rule or ML)
+    # We trust rules implicitly. We trust ML if it's confident.
+    risk_score = max(rule_score, ml_prob)
+    
+    verdict = "benign"
+    
+    # CRITICAL FINDINGS overrides everything
+    has_critical = any(f["severity"] == "critical" for f in findings)
+    
+    if has_critical:
+        verdict = "malicious"
+        risk_score = 1.0
+    elif rule_score >= 0.60:
+        verdict = "malicious"
+    elif rule_score >= 0.30:
+        verdict = "suspicious"
+    # Fallback to ML if Rules are quiet
+    elif ml_prob >= 0.75:
+         verdict = "malicious"
+    elif ml_prob >= 0.50:
+         verdict = "suspicious"
+    else:
+         verdict = "benign"
+
+    # 4. Sanitization (Rebuild Phase)
+    # ONLY sanitize if malicious. Modifying benign files is unsafe/unnecessary.
+    clean_bytes = None
+    san_meta = {}
+    
+    if verdict == "malicious":
+        clean_bytes, san_meta = _run_sanitizer(ext, data)
+        sanitized = (clean_bytes is not None)
+    else:
+        sanitized = False
+        san_meta = {"reason": "verdict_not_malicious"}
+
+    # 5. Recommendation
+    recs = []
+    if verdict == "malicious":
+        recs.append("Do not open this file on a production workstation.")
+        recs.append("Use the sanitized version if available.")
+    if "office_macro" in str(findings):
+        recs.append("Disable Macros in Microsoft Office Trust Center.")
+    if "pdf_js" in str(findings):
+        recs.append("Disable JavaScript in your PDF Viewer.")
+
+    # 6. Final Report
+    return {
+        "ok": True,
+        "verdict": verdict,
+        "risk_score": float(risk_score),
+        "model_scores": {
+            "rules": float(rule_score),
+            "lgbm": float(ml_prob),
+            # UI Compat: Map 'tree' and 'dl' to prevent 0% empty bars.
+            # 'tree' -> LightGBM is a tree ensemble, so we map it there.
+            # 'dl' -> Maps to our composite Deep Analysis score (risk_score).
+            "tree": float(ml_prob),
+            "dl": float(risk_score),
+            "composite": float(risk_score)
+        },
+        "findings": findings,
+        "recommendations": recs,
+        "meta": {
+            "filename": filename,
+            "mime": mime,
+            "size": filesize,
+            "sha256": file_sha,
+            "ext": ext
+        },
+        "clean_bytes": clean_bytes,
+        "sanitized_bytes": clean_bytes, # Legacy key support
+        "sanitizer": san_meta,
+        # Legacy 'report' structure for UI compatibility if needed
+        "report": {
             "verdict": verdict,
-            "risk_score": float(risk_score),
-            "model_scores": {
-                "lgbm": float(signals.get("P_LGBM", 0.0)),
-                "tree": float(signals.get("P_TREE", 0.0)),
-                "dl": float(signals.get("P_DL", 0.0)),
-                "rules": float(signals.get("P_RULES", 0.0)),
-            },
+            "risk_score": risk_score,
             "findings": findings,
-            "recommendations": recommendations,
-            "meta": {
-                "file": filename,
-                "mime_type": mime,
-                "size_bytes": size,
-                "sha256": sha,
-                "ext": ext,
-            },
-            "clean_bytes": clean_bytes if sanitized else None,
-            "sanitized_bytes": clean_bytes if sanitized else None,
-            "sanitizer": san_meta,
-            "report": {
-                "version": 1,
-                "engine": "safedocs-ensemble",
-                "filename": filename,
-                "verdict": verdict,
-                "risk_score": float(risk_score),
-                "signals": signals,
-                "findings": findings,
-                "meta": {
-                    "mime_type": mime,
-                    "size_bytes": size,
-                    "sha256": sha,
-                    "sanitized": bool(sanitized),
-                    "ext": ext,
-                },
-            },
+            "signals": {"P_RULES": rule_score, "P_LGBM": ml_prob}
         }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "verdict": "benign",
-            "risk_score": 0.0,
-            "model_scores": {"lgbm": 0.0, "tree": 0.0, "dl": 0.0, "rules": 0.0},
-            "findings": [{"id":"fallback", "severity":"info", "message":"Scanner fallback path used."}],
-            "recommendations": _recommendations(_ext_from_name(filename), "benign"),
-            "meta": {
-                "file": filename,
-                "mime_type": "application/octet-stream",
-                "size_bytes": len(data),
-                "sha256": _sha256(data),
-                "ext": _ext_from_name(filename),
-            },
-            "clean_bytes": None,
-            "sanitized_bytes": None,
-            "sanitizer": {"error": str(exc)},
-            "report": {
-                "version": 1,
-                "engine": "safedocs-ensemble",
-                "filename": filename,
-                "verdict": "benign",
-                "risk_score": 0.0,
-                "signals": {"fallback": True},
-                "findings": [{"id":"fallback","severity":"info","message":str(exc)}],
-                "meta": {"exception": str(exc)},
-            },
-        }
+    }
