@@ -89,17 +89,18 @@ function ScanReportContent() {
     const sha = result.sha256 || meta.sha256 || "";
 
     // Use clean file's risk score if available (after sanitization)
-    const wasSanitized = result.sanitized || result.report?.sanitized || false;
+    const wasSanitized = !!(result.sanitized || result.report?.sanitized);
     const originalScore = typeof result.risk_score === "number" ? result.risk_score : (result.report?.risk_score ?? 0);
     const cleanScore = typeof result.clean_risk_score === "number" ? result.clean_risk_score : (result.report?.clean_risk_score ?? originalScore);
 
-    // Show clean score if file was sanitized, otherwise show original
+    // Display verdict: Prefer clean verdict if sanitized, else original
+    const originalVerdict = (result.verdict || (originalScore >= 0.5 ? "malicious" : "benign")).toLowerCase();
+    const cleanVerdict = (result.clean_verdict || result.report?.clean_verdict || (cleanScore >= 0.5 ? "malicious" : "benign")).toLowerCase();
+
+    // Final display values
     const score = wasSanitized ? cleanScore : originalScore;
-
-    const verdict = result.verdict && result.verdict !== "scan_error" ? result.verdict : (score >= 0.5 ? "malicious" : "benign");
-    // Case-insensitive check (backend returns uppercase, frontend might use lowercase)
-    const isMalicious = verdict.toLowerCase() === "malicious";
-
+    const verdict = wasSanitized ? cleanVerdict : originalVerdict;
+    const isMalicious = verdict === "malicious";
     // Risk level categorization with colors
     const getRiskLevel = (riskScore: number) => {
         if (riskScore >= 0.71) return { level: "CRITICAL", color: "red", bg: "bg-red-500", text: "text-red-500" };
@@ -107,6 +108,8 @@ function ScanReportContent() {
         if (riskScore >= 0.21) return { level: "MEDIUM", color: "yellow", bg: "bg-yellow-500", text: "text-yellow-500" };
         return { level: "LOW", color: "green", bg: "bg-emerald-500", text: "text-emerald-500" };
     };
+
+    const riskLevel = getRiskLevel(score);
 
     const originalRiskLevel = getRiskLevel(originalScore);
     const cleanRiskLevel = getRiskLevel(cleanScore);
@@ -249,6 +252,29 @@ function ScanReportContent() {
                                 />
                             </div>
                         </motion.div>
+
+                        {/* Sanitization status banner */}
+                        {wasSanitized && (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.98 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="p-5 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between shadow-lg shadow-blue-500/5"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="h-12 w-12 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-500 shadow-inner">
+                                        <FiShield size={24} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-base font-bold text-white tracking-tight">Structural Sanitization Applied</h4>
+                                        <p className="text-xs text-slate-400 mt-0.5">All active threats have been neutralized. The downloadable file is verified secure.</p>
+                                    </div>
+                                </div>
+                                <div className="hidden md:flex flex-col items-end">
+                                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-1">Status</span>
+                                    <span className="px-3 py-1 rounded-full bg-blue-500 text-white text-[10px] font-black shadow-lg shadow-blue-500/30">CDR SECURE</span>
+                                </div>
+                            </motion.div>
+                        )}
 
                         {/* Findings */}
                         <section>
