@@ -196,17 +196,30 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
         sha = _sha256(data)
 
         signals: Dict[str, float] = {}
+        
+        # 1. ML Features (LightGBM)
         if build_features_for_lgbm:
             try:
                 feats = build_features_for_lgbm(data=data, filename=filename, ext=ext)
-                p_lgbm = float(feats.get("P_LGBM", 0.0)) if isinstance(feats, dict) else 0.0
-                signals["P_LGBM"] = max(0.0, min(1.0, p_lgbm))
-            except Exception:
-                pass
+                if isinstance(feats, dict):
+                     # Copy all features to signals so we can see them if needed
+                     for k, v in feats.items():
+                         if k.startswith("P_") or k in ["entropy", "size_bytes"]:
+                             signals[k] = float(v)
+            except Exception as e:
+                signals["lgbm_error"] = str(e)
+                print(f"ML Error: {e}")
 
-        h = _simple_heuristics(data, ext)
-        for k, v in h.items():
-            signals[k] = max(signals.get(k, 0.0), v)
+        # 2. Heuristics (Tree, DL, Rules)
+        try:
+            h = _simple_heuristics(data, ext)
+            for k, v in h.items():
+                # Don't overwrite if ML provided a better score for same key (unlikely)
+                if k not in signals:
+                    signals[k] = v
+        except Exception as e:
+             signals["heuristics_error"] = str(e)
+             print(f"Heuristics Error: {e}")
 
         risk_score = float(signals.get("P_META", 0.0))
         if "P_LGBM" in signals:
