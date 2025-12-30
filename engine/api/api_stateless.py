@@ -7,6 +7,14 @@ import mimetypes
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+import sys
+from pathlib import Path
+engine_root = Path(__file__).parent.parent
+for folder in ["core", "sanitizers", "models", "utils", "api"]:
+    p = str(engine_root / folder)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,10 +25,6 @@ from shared_logic import (
     sanitize_with_available_tools, humanize_findings
 )
 
-# Reuse existing scan logic
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "core"))
 from scan_file import scan_bytes
 
 app = FastAPI(title="SafeDocs Stateless Engine", version="2.0.0")
