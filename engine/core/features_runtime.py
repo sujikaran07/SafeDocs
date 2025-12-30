@@ -12,7 +12,8 @@ _FEATURE_COLS = None
 
 try:
     import joblib
-    models_dir = Path(__file__).parent / "models"
+    # Fix: models are in engine/models, not engine/core/models
+    models_dir = Path(__file__).parent.parent / "models"
     model_path = models_dir / "lightgbm_calibrated.pkl"
     
     if model_path.exists():
