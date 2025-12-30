@@ -2,10 +2,8 @@ import NextAuth, { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
 
 export const authOptions: NextAuthOptions = {
     adapter: PrismaAdapter(prisma) as any,
@@ -14,10 +12,12 @@ export const authOptions: NextAuthOptions = {
             clientId: process.env.GOOGLE_CLIENT_ID || "",
             clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
             profile(profile) {
+                const email = profile.email?.toLowerCase().trim() || null;
+                console.log('🔍 Google Profile received:', { name: profile.name, email });
                 return {
                     id: profile.sub,
                     name: profile.name,
-                    email: profile.email.toLowerCase().trim(),
+                    email: email,
                     image: profile.picture,
                 }
             }
@@ -91,6 +91,14 @@ export const authOptions: NextAuthOptions = {
         },
     },
 };
+
+// Log warning if NEXTAUTH_SECRET is missing (major cause of 500 errors in production)
+if (!process.env.NEXTAUTH_SECRET) {
+    console.error('❌ CRITICAL: NEXTAUTH_SECRET is not defined in environment variables!');
+}
+if (!process.env.NEXTAUTH_URL) {
+    console.warn('⚠️ WARNING: NEXTAUTH_URL is not defined. This may cause issues in production.');
+}
 
 const handler = NextAuth(authOptions);
 
