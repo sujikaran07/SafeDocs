@@ -20,7 +20,7 @@ prisma.$connect()
     .then(() => console.log('✅ NextAuth: Database connection successful'))
     .catch(err => console.error('❌ NextAuth: Database connection failed:', err.message));
 
-export const authOptions: NextAuthOptions = {
+const authOptions: NextAuthOptions = {
     adapter: PrismaAdapter(prisma) as any,
     providers: [
         GoogleProvider({

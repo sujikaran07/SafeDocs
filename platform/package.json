@@ -12,8 +12,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
     "@auth/prisma-adapter": "^2.11.1",
+    "@prisma/client": "^5.22.0",
     "@stripe/stripe-js": "^8.6.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -36,6 +36,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
