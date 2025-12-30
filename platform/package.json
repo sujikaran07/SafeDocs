@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "engine:dev": "cd ../engine && py -m uvicorn api.api_stateless:app --reload --port 8000",
