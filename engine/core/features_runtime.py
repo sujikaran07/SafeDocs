@@ -93,9 +93,9 @@ def build_features_for_lgbm(data=None, filename: str = "", ext: str = "", path: 
     Returns dict with P_LGBM. Includes 'error' key if model failed to load.
     """
     try:
-        # Check for load error first
         if _LOAD_ERROR:
-            return {"P_LGBM": 0.0, "error": f"Model load failed: {_LOAD_ERROR}"}
+            # Don't return P_LGBM=0.0, return error dict so heuristics can take over
+            return {"error": f"Model load failed: {_LOAD_ERROR}"}
         
         # Handle both path and bytes input
         if path and isinstance(path, Path):
@@ -106,7 +106,7 @@ def build_features_for_lgbm(data=None, filename: str = "", ext: str = "", path: 
                 filename = path.name
         
         if data is None:
-            return {"P_LGBM": 0.0}
+            return {}
         
         # Extract metadata
         meta = sniff_meta_from_bytes(data, ext)
@@ -153,14 +153,12 @@ def build_features_for_lgbm(data=None, filename: str = "", ext: str = "", path: 
                 
                 features["P_LGBM"] = float(prob)
             except Exception as e:
-                features["P_LGBM"] = 0.0
                 features["error"] = f"Prediction failed: {e}"
         else:
-            features["P_LGBM"] = 0.0
             if not _MODEL:
                 features["error"] = "Model not loaded (unknown reason)"
         
         return features
         
     except Exception as e:
-        return {"P_LGBM": 0.0, "error": f"Feature extraction crash: {e}"}
+        return {"error": f"Feature extraction crash: {e}"}
