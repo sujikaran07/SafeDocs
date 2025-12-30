@@ -5,6 +5,21 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
+// Database & Env Diagnostics for Production 500 Troubleshooting
+console.log('--- NextAuth Initialization Diagnostics ---');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('NEXTAUTH_URL:', process.env.NEXTAUTH_URL);
+console.log('NEXTAUTH_SECRET present:', !!process.env.NEXTAUTH_SECRET);
+console.log('DATABASE_URL present:', !!process.env.DATABASE_URL);
+if (process.env.DATABASE_URL) {
+    console.log('DATABASE_URL prefix:', process.env.DATABASE_URL.substring(0, 15) + '...');
+}
+
+// Test Database Connection immediately
+prisma.$connect()
+    .then(() => console.log('✅ NextAuth: Database connection successful'))
+    .catch(err => console.error('❌ NextAuth: Database connection failed:', err.message));
+
 export const authOptions: NextAuthOptions = {
     adapter: PrismaAdapter(prisma) as any,
     providers: [
