@@ -16,6 +16,7 @@ except Exception:
 
 try:
     from PyPDF2 import PdfReader, PdfWriter
+    from PyPDF2.generic import NameObject, ArrayObject
 except Exception as e:
     raise RuntimeError("PyPDF2 is required for PDF sanitization") from e
 
@@ -157,12 +158,32 @@ def sanitize_pdf(in_path: str | Path, out_path: str | Path):
                 del page["/AA"]; removed.append("Page.AA"); stats["actions"] += 1
             if "/Annots" in page:
                 try:
-                    # Drop ALL annotations (links, buttons, JS) for safety
-                    count = len(page["/Annots"])
-                    del page["/Annots"]
-                    removed.append(f"Annots({count})")
-                    stats["annotations"] += count
-                except Exception: pass
+                    # Filter annotations instead of dropping all
+                    annots = page["/Annots"]
+                    if isinstance(annots, list):
+                        safe_annots = []
+                        for a in annots:
+                            # Dereference if indirect object
+                            a_obj = a.get_object() if hasattr(a, "get_object") else a
+                            subtype = a_obj.get("/Subtype", "")
+                            # Drop Widget (forms), Screen (media), Link (if external), or any with JS actions
+                            is_dangerous = (
+                                "/JavaScript" in a_obj or 
+                                "/JS" in a_obj or 
+                                "/AA" in a_obj or
+                                subtype in ["/Screen", "/Movie", "/3D"]
+                            )
+                            if not is_dangerous:
+                                safe_annots.append(a)
+                            else:
+                                stats["annotations"] += 1
+                                removed.append("Annot.Risk")
+                        
+                        # Update page annotations
+                        if len(safe_annots) < len(annots):
+                            page[NameObject("/Annots")] = ArrayObject(safe_annots)
+                except Exception: 
+                    pass
             writer.add_page(page)
 
         # Write to intermediate buffer
