@@ -171,9 +171,8 @@ def sanitize_pdf(in_path: str | Path, out_path: str | Path):
         writer.write(buf)
         cleaned_pdf = buf.getvalue()
 
-        # 2) Deep Byte Scrub (Preserving length to avoid corruption)
-        # This catches incremental updates and obfuscated keywords
-        cleaned_pdf = _scrub_bytes_safely(cleaned_pdf, EXPANDED_TERMS)
+        # 2) Deep Byte Scrub SKIPPED for primary path to prevent content corruption
+        # cleaned_pdf = _scrub_bytes_safely(cleaned_pdf, EXPANDED_TERMS)
 
         # 3) Final Polish with pikepdf (if available) - rebuilds XRefs properly
         if pikepdf:
