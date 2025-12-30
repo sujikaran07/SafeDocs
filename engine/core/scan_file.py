@@ -70,7 +70,7 @@ def _byte_entropy(sample: bytes, max_bytes: int = 65536) -> float:
 
 # ---- simple findings / rules (deterministic) ----
 
-PDF_JS_PATTERNS = [br"/JavaScript", br"/JS", br"/AA", br"/OpenAction", br"/Launch"]
+PDF_JS_PATTERNS = [br"/JavaScript", br"/JS", br"/Launch"]
 OOXML_VBA_HINTS = ["vbaProject.bin", "vba", "vbaproject", "_vba_project", "ThisDocument"]
 RTF_DANGEROUS = [r"\\objupdate", r"\\object", r"\\objdata", r"\\pict", r"\\field", r"\\*\s*generator"]
 SUSPICIOUS_STRINGS = [
@@ -284,28 +284,21 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
         # Extract findings BEFORE determining verdict
         findings = _extract_findings(data, ext)
 
-        # DEBUG: Add ML/Heuristic errors to findings so we can see them in UI
         if "lgbm_error" in signals:
              findings.append({
                  "id": "debug_ml_error",
                  "severity": "info",
                  "message": f"ML Engine Error: {signals['lgbm_error']}"
              })
-        if "heuristics_error" in signals:
-             findings.append({
-                 "id": "debug_heuristics_error",
-                 "severity": "info",
-                 "message": f"Heuristics Error: {signals['heuristics_error']}"
-             })
-        
-        # Verdict based on ACTUAL malicious features, not arbitrary threshold
+
+        # Verdict based on ACTUAL malicious features
         # Check for concrete evidence of malicious content
         
         # Check if JavaScript/macros present (both by ID and by content)
+        # Note: We exclude regex-only hits for AA/OpenAction from "high risk" to avoid FP
         javascript_ids = ["pdf_script_js", "ooxml_macro", "rtf_object"]
         has_javascript_by_id = any(f.get("id") in javascript_ids for f in findings)
         
-        # Also check if finding description mentions javascript
         has_javascript_in_text = any(
             "javascript" in str(f.get("text", "")).lower() or 
             "javascript" in str(f.get("description", "")).lower()
@@ -314,15 +307,14 @@ def scan_bytes(data: bytes, filename: str = "document.bin", content_type: Option
         
         has_javascript = has_javascript_by_id or has_javascript_in_text
         has_high_risk_findings = any(f.get("severity") == "high" for f in findings)
-        has_medium_risk_with_high_score = any(f.get("severity") == "medium" for f in findings) and risk_score >= 0.70
         
-        # Determine verdict based on findings + risk score combination
         # Determine verdict based on findings + risk score combination
         if has_javascript or has_high_risk_findings:
             # Concrete signature match = 100% confidence
             verdict = "malicious"
             risk_score = 1.0
             signals["P_RULES"] = 1.0
+            signals["rules"] = 1.0  # Explicitly sync to frontend key
             signals["P_META"] = 1.0
         elif has_medium_risk_with_high_score:
             # Medium findings + high ML score = likely malicious
