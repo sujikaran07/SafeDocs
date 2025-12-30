@@ -26,85 +26,61 @@ def _sha256(b: bytes) -> str:
 
 def _sanitize_with_pikepdf(in_path: Path, out_path: Path) -> Dict[str, Any]:
     """
-    Surgically remove JS and Actions using QPDF/pikepdf.
-    This preserves the PDF structure (XRefs, uncompressed streams) much better than re-building.
+    Recursively remove JS and Actions from ALL objects using QPDF/pikepdf.
+    This finds threats hidden deep in the PDF structure.
     """
     removed = []
     stats = {"js": 0, "actions": 0, "annotations": 0}
     
     with pikepdf.open(str(in_path), allow_overwriting_input=True) as pdf:
-        # 1. Clean Root / Catalog
-        root = pdf.root
-        if "/OpenAction" in root:
-            del root["/OpenAction"]
-            removed.append("OpenAction")
-            stats["actions"] += 1
-        if "/AA" in root:
-            del root["/AA"]
-            removed.append("Catalog.AA")
-            stats["actions"] += 1
+        # Define dangerous keys and values to hunt for
+        DANGEROUS_KEYS = ["/AA", "/OpenAction", "/JS", "/JavaScript", "/Launch", "/SubmitForm", "/ImportData", "/RichMedia", "/RichMediaContent"]
         
-        # 2. Clean Names (Embedded JS)
-        if "/Names" in root and "/JavaScript" in root["/Names"]:
-            del root["/Names"]["/JavaScript"]
-            removed.append("Names.JavaScript")
-            stats["js"] += 1
+        # Recursive walker to clean any dictionary object found
+        def clean_object(obj, path=""):
+            if isinstance(obj, pikepdf.Dictionary):
+                # 1. Check for dangerous keys
+                for key in list(obj.keys()):
+                    if key in DANGEROUS_KEYS:
+                        del obj[key]
+                        removed.append(f"{path}{key}")
+                        stats["js" if "JS" in key or "Script" in key else "actions"] += 1
+                
+                # 2. Check for dangerous Actions (/A)
+                if "/A" in obj:
+                    action = obj.get("/A")
+                    if isinstance(action, pikepdf.Dictionary) and "/S" in action:
+                        subtype = str(action.get("/S"))
+                        if subtype in ["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]:
+                            del obj["/A"]
+                            removed.append(f"{path}/A{subtype}")
+                            stats["actions"] += 1
 
-        # 3. Clean AcroForm (Form Actions)
-        if "/AcroForm" in root:
-            acro = root["/AcroForm"]
-            # Remove only dangerous keys, leave fields intact if possible
-            for k in ["/JS", "/JavaScript", "/AA"]:
-                if k in acro:
-                    del acro[k]
-                    removed.append(f"AcroForm{k}")
-                    stats["js" if "JS" in k else "actions"] += 1
-            # Note: We keep /XFA for now as removing it breaks modern forms,
-            # unless we detect it specifically has malicious scripts.
-            # (Future: parse XFA xml to sanitize it)
-
-        # 4. Clean Pages (Page Actions & Annotations)
-        for page in pdf.pages:
-            # Page Actions
-            if "/AA" in page:
-                del page["/AA"]
-                removed.append("Page.AA")
-                stats["actions"] += 1
+                # Recurse into children
+                for key, val in obj.items():
+                    # Limit recursion depth implicitly by object graph structure
+                    clean_object(val, f"{path}{key}/")
             
-            # Annotations
-            if "/Annots" in page:
-                annots = page["/Annots"]
-                # Iterate backwards to delete safely
-                for i in range(len(annots) - 1, -1, -1):
-                    try:
-                        a = annots[i]
-                        # Check logic: Actions or JS
-                        is_bad = False
-                        if "/A" in a: # Action dictionary
-                            action = a["/A"]
-                            if "/S" in action and action["/S"] in ["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]:
-                                is_bad = True
-                        if "/AA" in a: # Additional Actions
-                            is_bad = True
-                        
-                        if is_bad:
-                            del annots[i]
-                            stats["annotations"] += 1
-                    except Exception:
-                        pass
+            elif isinstance(obj, pikepdf.Array):
+                for i, item in enumerate(obj):
+                    clean_object(item, f"{path}[{i}]/")
 
-        # 5. Metadata Scrub (Optional but good)
-        if "/Metadata" in root:
-           del root["/Metadata"]
-        
-        # Save
-        pdf.save(str(out_path))
+        # Start recursion from Root
+        clean_object(pdf.root, "Root")
+
+        # Also iterate over all objects in the PDF body to catch unlinked but present threats
+        # (This is expensive but thorough)
+        for obj in pdf.objects:
+             clean_object(obj, "Obj")
+
+        # Save with full rewrite to purge deleted data
+        pdf.save(str(out_path), object_stream_mode=pikepdf.ObjectStreamMode.generate)
 
     return {
         "status": "ok",
         "sanitized_file": str(out_path),
         "removed": list(set(removed)),
-        "notes": ["Sanitized with pikepdf (Surgical)"],
+        "notes": ["Sanitized with pikepdf (Recursive)"],
         "stats": stats
     }
 
