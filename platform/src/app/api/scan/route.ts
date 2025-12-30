@@ -54,10 +54,19 @@ export async function POST(req: Request) {
 
         // 1. Save original to disk
         // Use /tmp in production (serverless/Vercel/Railway) to avoid EROFS: read-only file system
+        // Forced check for '/var/task' or '/app' which are common read-only paths in containers/serverless
+        const isReadOnlyEnv =
+            process.env.NODE_ENV === "production" ||
+            process.cwd().includes('/var/task') ||
+            process.cwd().includes('/app') ||
+            !!process.env.RAILWAY_ENVIRONMENT;
+
         const storageDir = process.env.STORAGE_PATH ||
-            (process.env.NODE_ENV === "production"
+            (isReadOnlyEnv
                 ? path.join(os.tmpdir(), "safedocs-storage")
                 : path.join(process.cwd(), "storage"));
+
+        console.log(`📂 Storage Selection: isReadOnlyEnv=${isReadOnlyEnv}, storageDir=${storageDir}, cwd=${process.cwd()}`);
 
         const uploadsDir = path.join(storageDir, "uploads");
         await mkdir(uploadsDir, { recursive: true });
