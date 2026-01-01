@@ -280,7 +280,7 @@ function DashboardContent() {
                             <span className="text-xs text-slate-500">{items.length} total scans</span>
                         </div>
 
-                        <div className="overflow-hidden rounded-3xl border border-slate-300 dark:border-white/10 bg-white dark:bg-white/[0.01] shadow-sm">
+                        <div className="overflow-x-auto rounded-3xl border border-slate-300 dark:border-white/10 bg-white dark:bg-white/[0.01] shadow-sm">
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="bg-slate-100 dark:bg-white/5">

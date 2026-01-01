@@ -185,7 +185,7 @@ function ScanContent() {
                         accept=".pdf,.docx,.pptx,.xlsx,.rtf"
                     />
 
-                    <div className="p-12 md:p-20 flex flex-col items-center text-center">
+                    <div className="p-8 md:p-20 flex flex-col items-center text-center">
                         <AnimatePresence mode="wait">
                             {!file ? (
                                 <motion.div
@@ -205,7 +205,7 @@ function ScanContent() {
                                     <button
                                         type="button"
                                         onClick={() => inputRef.current?.click()}
-                                        className="rounded-full bg-blue-600 hover:bg-blue-500 px-10 py-4 text-base font-bold text-white transition-all transform hover:scale-105 shadow-lg shadow-blue-600/50"
+                                        className="w-full sm:w-auto rounded-full bg-blue-600 hover:bg-blue-500 px-10 py-4 text-base font-bold text-white transition-all transform hover:scale-105 shadow-lg shadow-blue-600/50"
                                     >
                                         Choose File
                                     </button>
@@ -226,12 +226,12 @@ function ScanContent() {
                                         {(file.size / 1024 / 1024).toFixed(2)} MB • Ready for AI analysis
                                     </p>
 
-                                    <div className="flex gap-4">
+                                    <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto justify-center">
                                         <button
                                             type="button"
                                             onClick={() => { setFile(null); setErr(null); }}
                                             disabled={busy}
-                                            className="rounded-full border-2 border-slate-300 dark:border-white/10 px-8 py-3 text-base font-bold text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 transition-all"
+                                            className="w-full sm:w-auto rounded-full border-2 border-slate-300 dark:border-white/10 px-8 py-3 text-base font-bold text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 transition-all"
                                         >
                                             Remove
                                         </button>
@@ -239,7 +239,7 @@ function ScanContent() {
                                             type="button"
                                             onClick={handleScan}
                                             disabled={busy}
-                                            className="rounded-full bg-blue-600 px-10 py-3 text-base font-bold text-white hover:bg-blue-500 shadow-lg shadow-blue-600/50 disabled:opacity-50 transition-all transform hover:scale-105"
+                                            className="w-full sm:w-auto rounded-full bg-blue-600 px-10 py-3 text-base font-bold text-white hover:bg-blue-500 shadow-lg shadow-blue-600/50 disabled:opacity-50 transition-all transform hover:scale-105"
                                         >
                                             {busy ? "Analyzing..." : "Start Scan"}
                                         </button>

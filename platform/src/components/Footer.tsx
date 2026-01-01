@@ -6,7 +6,7 @@ export default function Footer() {
   return (
     <footer className="relative bg-slate-100 dark:bg-[#0a0a0a] border-t border-slate-300 dark:border-slate-800">
       <div className="mx-auto max-w-7xl px-6 py-12">
-        <div className="grid gap-8 md:grid-cols-1 lg:grid-cols-[2fr_1fr_1fr_1fr]">
+        <div className="grid gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr]">
           {/* Brand Section - 40% */}
           <div className="space-y-4">
             <div className="flex items-center gap-2">

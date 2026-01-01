@@ -32,14 +32,14 @@ export default function Landing() {
           />
         </div>
         <div className="absolute inset-0 z-10 bg-gradient-to-b from-white/30 via-white/60 to-white dark:from-black/20 dark:via-black/55 dark:to-black" />
-        <div className="relative z-20 mx-auto max-w-7xl px-4 py-20 md:py-28 text-center">
+        <div className="relative z-20 mx-auto max-w-7xl px-4 py-16 md:py-28 text-center">
           <div className="inline-block mb-6">
             <span className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400">
               <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
               AI-Powered Security Platform
             </span>
           </div>
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold tracking-tight">
             <span className="text-white">Safe</span>
             <span className="text-blue-500">Docs</span>
           </h1>
@@ -51,19 +51,19 @@ export default function Landing() {
           </p>
 
           {!loading && (
-            <div className="mt-12 flex items-center justify-center gap-4">
+            <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
               {isAuthenticated ? (
                 <>
                   <Link
                     href="/scan"
-                    className="inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Scan Document
                     <ArrowRight className="w-5 h-5" />
                   </Link>
                   <Link
                     href="/dashboard"
-                    className="inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold text-slate-900 dark:text-white bg-white/20 hover:bg-white/30 dark:bg-white/10 dark:hover:bg-white/20 transition-all backdrop-blur-sm border border-white/30"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-slate-900 dark:text-white bg-white/20 hover:bg-white/30 dark:bg-white/10 dark:hover:bg-white/20 transition-all backdrop-blur-sm border border-white/30"
                   >
                     View Dashboard
                   </Link>
@@ -72,14 +72,14 @@ export default function Landing() {
                 <>
                   <Link
                     href="/auth?mode=signup"
-                    className="inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Get Started Free
                     <ArrowRight className="w-5 h-5" />
                   </Link>
                   <Link
                     href="/auth"
-                    className="inline-flex items-center rounded-full px-8 py-4 text-base font-bold text-white bg-white/10 hover:bg-white/20 transition-all backdrop-blur-sm border border-white/20"
+                    className="w-full sm:w-auto inline-flex items-center justify-center rounded-full px-8 py-4 text-base font-bold text-white bg-white/10 hover:bg-white/20 transition-all backdrop-blur-sm border border-white/20"
                   >
                     Sign In
                   </Link>
@@ -91,7 +91,7 @@ export default function Landing() {
       </section>
 
       {/* FEATURES */}
-      <section className="relative bg-gradient-to-b from-white via-slate-50 to-white dark:from-black dark:via-slate-950 dark:to-black py-28">
+      <section className="relative bg-gradient-to-b from-white via-slate-50 to-white dark:from-black dark:via-slate-950 dark:to-black py-16 md:py-28">
         <div
           className="absolute inset-0 z-0 bg-repeat opacity-5"
           style={{
@@ -102,14 +102,14 @@ export default function Landing() {
         />
         <div className="relative z-10 mx-auto max-w-7xl px-4">
           {/* Section Header */}
-          <div className="text-center mb-20">
+          <div className="text-center mb-12 md:mb-20">
             <div className="inline-block mb-6">
               <span className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400">
                 <ShieldCheck className="w-4 h-4" />
                 Core Capabilities
               </span>
             </div>
-            <h2 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6">
+            <h2 className="text-3xl sm:text-4xl md:text-6xl font-extrabold tracking-tight mb-6">
               <span className="text-slate-900 dark:text-white">Advanced </span>
               <span className="bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">AI-Powered</span>
               <span className="text-slate-900 dark:text-white"> Security</span>
@@ -120,7 +120,7 @@ export default function Landing() {
           </div>
 
           {/* Features Grid */}
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {[
               {
                 icon: Cpu,
@@ -179,23 +179,23 @@ export default function Landing() {
 
 
           {/* Pipeline Section */}
-          <div className="mt-32 text-center">
+          <div className="mt-20 md:mt-32 text-center">
             <div className="inline-block mb-6">
               <span className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400">
                 <Zap className="w-4 h-4" />
                 Security Pipeline
               </span>
             </div>
-            <h2 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6">
+            <h2 className="text-3xl sm:text-4xl md:text-6xl font-extrabold tracking-tight mb-6">
               <span className="text-slate-900 dark:text-white">The </span>
               <span className="bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">Security</span>
               <span className="text-slate-900 dark:text-white"> Pipeline</span>
             </h2>
-            <p className="text-lg md:text-xl text-slate-600 dark:text-slate-400 max-w-3xl mx-auto mb-16 leading-relaxed">
+            <p className="text-lg md:text-xl text-slate-600 dark:text-slate-400 max-w-3xl mx-auto mb-10 md:mb-16 leading-relaxed">
               Intelligent four-layer security architecture for comprehensive threat elimination
             </p>
 
-            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4 text-left relative">
+            <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4 text-left relative">
               {/* Connection Lines (hidden on mobile) */}
               <div className="hidden lg:block absolute top-16 left-0 w-full h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-emerald-500 opacity-20"></div>
 
@@ -253,8 +253,8 @@ export default function Landing() {
 
           {/* CTA Section */}
           {!isAuthenticated && !loading && (
-            <div className="mt-32">
-              <div className="relative rounded-[2.5rem] bg-white dark:bg-slate-900 border-2 border-blue-500/20 dark:border-blue-500/30 p-16 shadow-xl overflow-hidden">
+            <div className="mt-20 md:mt-32">
+              <div className="relative rounded-[2.5rem] bg-white dark:bg-slate-900 border-2 border-blue-500/20 dark:border-blue-500/30 p-8 md:p-16 shadow-xl overflow-hidden">
                 {/* Subtle Background Pattern */}
                 <div className="absolute inset-0 opacity-5">
                   <div className="absolute inset-0 bg-repeat" style={{ backgroundImage: `url(/polygonScatter.png)`, backgroundSize: "300px" }}></div>
@@ -274,7 +274,7 @@ export default function Landing() {
                     </div>
                   </div>
 
-                  <h3 className="text-4xl md:text-5xl font-extrabold mb-6 tracking-tight">
+                  <h3 className="text-3xl sm:text-4xl md:text-5xl font-extrabold mb-6 tracking-tight">
                     <span className="text-slate-900 dark:text-white">Deploy </span>
                     <span className="bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">AI-Powered</span>
                     <span className="text-slate-900 dark:text-white"> Document Security</span>
@@ -285,7 +285,7 @@ export default function Landing() {
 
                   <Link
                     href="/auth?mode=signup"
-                    className="inline-flex items-center gap-3 rounded-full px-10 py-5 text-lg font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-full px-10 py-5 text-lg font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Start Free Trial
                     <ArrowRight className="w-6 h-6" />
