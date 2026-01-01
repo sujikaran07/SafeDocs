@@ -51,19 +51,19 @@ export default function Landing() {
           </p>
 
           {!loading && (
-            <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="mt-12 flex flex-col md:flex-row items-center justify-center gap-4">
               {isAuthenticated ? (
                 <>
                   <Link
                     href="/scan"
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Scan Document
                     <ArrowRight className="w-5 h-5" />
                   </Link>
                   <Link
                     href="/dashboard"
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-slate-900 dark:text-white bg-white/20 hover:bg-white/30 dark:bg-white/10 dark:hover:bg-white/20 transition-all backdrop-blur-sm border border-white/30"
+                    className="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-slate-900 dark:text-white bg-white/20 hover:bg-white/30 dark:bg-white/10 dark:hover:bg-white/20 transition-all backdrop-blur-sm border border-white/30"
                   >
                     View Dashboard
                   </Link>
@@ -72,14 +72,14 @@ export default function Landing() {
                 <>
                   <Link
                     href="/auth?mode=signup"
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Get Started Free
                     <ArrowRight className="w-5 h-5" />
                   </Link>
                   <Link
                     href="/auth"
-                    className="w-full sm:w-auto inline-flex items-center justify-center rounded-full px-8 py-4 text-base font-bold text-white bg-white/10 hover:bg-white/20 transition-all backdrop-blur-sm border border-white/20"
+                    className="w-full md:w-auto inline-flex items-center justify-center rounded-full px-8 py-4 text-base font-bold text-white bg-white/10 hover:bg-white/20 transition-all backdrop-blur-sm border border-white/20"
                   >
                     Sign In
                   </Link>
@@ -285,7 +285,7 @@ export default function Landing() {
 
                   <Link
                     href="/auth?mode=signup"
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-full px-10 py-5 text-lg font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
+                    className="w-full md:w-auto inline-flex items-center justify-center gap-3 rounded-full px-10 py-5 text-lg font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50"
                   >
                     Start Free Trial
                     <ArrowRight className="w-6 h-6" />
